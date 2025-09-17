@@ -599,7 +599,7 @@ def main():
                 
         # Generate security audit prompt
         prompt = get_security_audit_prompt(pr_data, pr_diff, custom_scan_instructions=custom_scan_instructions)
-        logger.info(f"Security audit prompt:\n{prompt}")        # Run Claude Code security audit
+        # logger.info(f"Security audit prompt:\n{prompt}")        # Run Claude Code security audit
 
         
         # Run Claude Code security audit
