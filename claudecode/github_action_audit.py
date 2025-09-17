@@ -27,10 +27,8 @@ from claudecode.constants import (
 )
 from claudecode.logger import get_logger
 from claudecode.secret_detector import gitmask_secrets_in_diff
-from claudecode.debug_logger import get_debug_logger
 
 logger = get_logger(__name__)
-debug_log = get_debug_logger("github_action_audit")  
 
 class ConfigurationError(ValueError):
     """Raised when configuration is invalid or missing."""
@@ -578,8 +576,10 @@ def main():
 
             # pr_diff = github_client.get_pr_diff(repo_name, pr_number)
             unmaskedpr_diff = github_client.get_pr_diff(repo_name, pr_number)
-            debug_log.debug(f"Retrieved PR diff: {len(unmaskedpr_diff)} chars")
+            logger.info("retrived pr Diff: {unmaskedpr_diff}")
+
             masked_diff = gitmask_secrets_in_diff(unmaskedpr_diff, verbose=False)
+            
             # Check if any secrets were actually masked
             if '[REDACTED_SECRET]' in masked_diff:
                 pr_diff = masked_diff
