@@ -202,6 +202,7 @@ runs:
       if: steps.claudecode-check.outputs.enable_claudecode == 'true'
       shell: bash
       env:
+       CLAUDE_DEBUG: 'true'
         GITHUB_TOKEN: ${{ github.token }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
