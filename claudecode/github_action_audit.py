@@ -575,7 +575,7 @@ def main():
             pr_data = github_client.get_pr_data(repo_name, pr_number)
             # pr_diff = github_client.get_pr_diff(repo_name, pr_number)
             unmaskedpr_diff = github_client.get_pr_diff(repo_name, pr_number)
-            masked_diff = gitmask_secrets_in_diff(unmaskedpr_diff, verbose=True)
+            masked_diff = gitmask_secrets_in_diff(unmaskedpr_diff, verbose=False)
             # Check if any secrets were actually masked
             if '[REDACTED_SECRET]' in masked_diff:
                 pr_diff = masked_diff
