@@ -231,6 +231,9 @@ class SimpleClaudeRunner:
             # Run Claude Code with retry logic
             NUM_RETRIES = 3
             for attempt in range(NUM_RETRIES):
+                logger.info(f"🔧 Prompt: {' '.join(prompt)}",file=sys.stderr)
+                logger.info(f"🔧 Command: {' '.join(cmd)}",file=sys.stderr)
+
                 result = subprocess.run(
                     cmd,
                     input=prompt,  # Pass prompt via stdin
