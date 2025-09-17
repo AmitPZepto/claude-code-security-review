@@ -576,7 +576,6 @@ def main():
 
             # pr_diff = github_client.get_pr_diff(repo_name, pr_number)
             unmaskedpr_diff = github_client.get_pr_diff(repo_name, pr_number)
-            logger.info("retrived pr Diff: {unmaskedpr_diff}")
 
             masked_diff = gitmask_secrets_in_diff(unmaskedpr_diff, verbose=False)
             
@@ -584,14 +583,10 @@ def main():
             if '[REDACTED_SECRET]' in masked_diff:
                 pr_diff = masked_diff
                 # print(f"[Debug] Secrets detected and masked, using masked diff")
-                logger.info(f"Secrets detected and masked, using masked dif")        # Run Claude Code security audit
 
             else:
                 pr_diff = unmaskedpr_diff
                 # print(f"PR diff_masked: {pr_diff}")
-
-            logger.info(f"PR diff_masked: {pr_diff}") 
-            logger.info(f"PR diff_masked: {unmaskedpr_diff}")
 
 
             # print(f"[Debug] PR diff_masked: {pr_diff}")
