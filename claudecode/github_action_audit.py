@@ -580,9 +580,15 @@ def main():
             if '[REDACTED_SECRET]' in masked_diff:
                 pr_diff = masked_diff
                 # print(f"[Debug] Secrets detected and masked, using masked diff")
+                logger.info(f"Secrets detected and masked, using masked dif")        # Run Claude Code security audit
+
             else:
                 pr_diff = unmaskedpr_diff
-                # print(f"[Debug] No secrets detected, using original diff")
+                # print(f"PR diff_masked: {pr_diff}")
+
+            logger.info(f"PR diff_masked: {pr_diff}") 
+            logger.info(f"PR diff_masked: {unmaskedpr_diff}")
+
 
             # print(f"[Debug] PR diff_masked: {pr_diff}")
             # print(f"[Debug] PR diff_unmasked: {unmaskedpr_diff}")
@@ -594,6 +600,8 @@ def main():
                 
         # Generate security audit prompt
         prompt = get_security_audit_prompt(pr_data, pr_diff, custom_scan_instructions=custom_scan_instructions)
+        logger.info(f"Security audit prompt:\n{prompt}")        # Run Claude Code security audit
+
         
         # Run Claude Code security audit
         # Get repo directory from environment or use current directory
