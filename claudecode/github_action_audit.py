@@ -578,19 +578,20 @@ def main():
             unmaskedpr_diff = github_client.get_pr_diff(repo_name, pr_number)
 
             masked_diff = gitmask_secrets_in_diff(unmaskedpr_diff, verbose=False)
+            pr_diff = masked_diff
             
             # Check if any secrets were actually masked
-            if '[REDACTED_SECRET]' in masked_diff:
-                pr_diff = masked_diff
-                # print(f"[Debug] Secrets detected and masked, using masked diff")
+            # if '[REDACTED_SECRET]' in masked_diff:
+            #     pr_diff = masked_diff
+            #     # print(f"[Debug] Secrets detected and masked, using masked diff")
 
-            else:
-                pr_diff = unmaskedpr_diff
-                # print(f"PR diff_masked: {pr_diff}")
+            # else:
+            #     pr_diff = unmaskedpr_diff
+            #     # print(f"PR diff_masked: {pr_diff}")
 
 
-            # print(f"[Debug] PR diff_masked: {pr_diff}")
-            # print(f"[Debug] PR diff_unmasked: {unmaskedpr_diff}")
+            # # print(f"[Debug] PR diff_masked: {pr_diff}")
+            # # print(f"[Debug] PR diff_unmasked: {unmaskedpr_diff}")
 
             
         except Exception as e:
