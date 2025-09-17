@@ -172,6 +172,30 @@ runs:
         fi
         sudo apt-get update && sudo apt-get install -y jq
         echo "::endgroup::"
+
+    - name: Install gitleaks
+      shell: bash
+      run: |
+        echo "::group::Install gitleaks"
+        # Install gitleaks for secret detection
+        # Get the latest version dynamically
+        GITLEAKS_VERSION=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | jq -r '.tag_name' | sed 's/v//')
+        echo "Installing gitleaks version: $GITLEAKS_VERSION"
+        
+        # Create local bin directory and add to PATH
+        mkdir -p ~/.local/bin
+        
+        # Download and install gitleaks to local bin
+        curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar -xz -C ~/.local/bin
+        chmod +x ~/.local/bin/gitleaks
+        
+        # Add to PATH for this session
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+        
+        # Verify installation
+        ~/.local/bin/gitleaks version
+        echo "Gitleaks installed successfully"
+        echo "::endgroup::"
     
     - name: Run ClaudeCode scan
       id: claudecode-scan
