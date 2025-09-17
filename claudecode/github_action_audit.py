@@ -26,6 +26,7 @@ from claudecode.constants import (
     SUBPROCESS_TIMEOUT
 )
 from claudecode.logger import get_logger
+from claudecode.secret_detector import gitmask_secrets_in_diff
 
 logger = get_logger(__name__)
 
@@ -572,7 +573,21 @@ def main():
         # Get PR data
         try:
             pr_data = github_client.get_pr_data(repo_name, pr_number)
-            pr_diff = github_client.get_pr_diff(repo_name, pr_number)
+            # pr_diff = github_client.get_pr_diff(repo_name, pr_number)
+            unmaskedpr_diff = github_client.get_pr_diff(repo_name, pr_number)
+            masked_diff = gitmask_secrets_in_diff(unmaskedpr_diff, verbose=True)
+            # Check if any secrets were actually masked
+            if '[REDACTED_SECRET]' in masked_diff:
+                pr_diff = masked_diff
+                print(f"[Debug] Secrets detected and masked, using masked diff")
+            else:
+                pr_diff = unmaskedpr_diff
+                print(f"[Debug] No secrets detected, using original diff")
+
+            print(f"[Debug] PR diff_masked: {pr_diff}")
+            print(f"[Debug] PR diff_unmasked: {unmaskedpr_diff}")
+
+            
         except Exception as e:
             print(json.dumps({'error': f'Failed to fetch PR data: {str(e)}'}))
             sys.exit(EXIT_GENERAL_ERROR)
