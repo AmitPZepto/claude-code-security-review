@@ -584,6 +584,8 @@ def main():
         # Get PR data
         try:
             pr_data = github_client.get_pr_data(repo_name, pr_number)
+            print(f"[Debug] PR data: {pr_data}",file=sys.stderr)
+
 
             unmaskedpr_diff = github_client.get_pr_diff(repo_name, pr_number)
             
