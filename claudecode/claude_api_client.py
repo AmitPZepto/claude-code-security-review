@@ -5,7 +5,7 @@ import json
 import time
 from typing import Dict, Any, Tuple, Optional
 from pathlib import Path
-
+import sys
 from anthropic import Anthropic
 
 from claudecode.constants import (
@@ -106,40 +106,78 @@ class ClaudeAPIClient:
                 if system_prompt:
                     api_params["system"] = system_prompt
                 
+                # Log API call parameters
+                print(f"🔧 Claude API call parameters:", file=sys.stderr)
+                print(f"   Model: {api_params['model']}", file=sys.stderr)
+                print(f"   Max tokens: {api_params['max_tokens']}", file=sys.stderr)
+                print(f"   Timeout: {api_params['timeout']}s", file=sys.stderr)
+                print(f"   System prompt: {'Yes' if system_prompt else 'No'}", file=sys.stderr)
+                print(f"   User prompt length: {len(prompt)} characters", file=sys.stderr)
+                
                 # Make API call
                 start_time = time.time()
                 response = self.client.messages.create(**api_params)
                 duration = time.time() - start_time
                 
+                # Log full API response
+                print(f"📤 FULL CLAUDE API RESPONSE:", file=sys.stderr)
+                print(f"   Response type: {type(response)}", file=sys.stderr)
+                print(f"   Response ID: {getattr(response, 'id', 'N/A')}", file=sys.stderr)
+                print(f"   Model: {getattr(response, 'model', 'N/A')}", file=sys.stderr)
+                print(f"   Role: {getattr(response, 'role', 'N/A')}", file=sys.stderr)
+                print(f"   Stop reason: {getattr(response, 'stop_reason', 'N/A')}", file=sys.stderr)
+                print(f"   Stop sequence: {getattr(response, 'stop_sequence', 'N/A')}", file=sys.stderr)
+                print(f"   Usage: {getattr(response, 'usage', 'N/A')}", file=sys.stderr)
+                
                 # Extract text from response
                 response_text = ""
-                for content_block in response.content:
+                print(f"   Content blocks: {len(response.content) if hasattr(response, 'content') else 'N/A'}", file=sys.stderr)
+                
+                for i, content_block in enumerate(response.content):
+                    print(f"   Content block {i}: {type(content_block)}", file=sys.stderr)
                     if hasattr(content_block, 'text'):
                         response_text += content_block.text
+                        print(f"   Block {i} text length: {len(content_block.text)} characters", file=sys.stderr)
+                        print(f"   Block {i} text preview: {content_block.text[:200]}...", file=sys.stderr)
+                    else:
+                        print(f"   Block {i} has no text attribute", file=sys.stderr)
                 
-                logger.info(f"Claude API call successful in {duration:.1f}s")
+                print(f"📤 FULL RESPONSE TEXT ({len(response_text)} characters):", file=sys.stderr)
+                print(f"{response_text}", file=sys.stderr)
+                
+                print(f"✅ Claude API call successful in {duration:.1f}s", file=sys.stderr)
                 return True, response_text, ""
                 
             except Exception as e:
                 error_msg = str(e)
                 last_error = error_msg
-                logger.error(f"Claude API call failed: {error_msg}")
+                
+                # Log detailed error information
+                print(f"❌ Claude API call failed (attempt {retries + 1}):", file=sys.stderr)
+                print(f"   Error type: {type(e).__name__}", file=sys.stderr)
+                print(f"   Error message: {error_msg}", file=sys.stderr)
+                print(f"   Error args: {e.args}", file=sys.stderr)
+                print(f"   Full exception: {repr(e)}", file=sys.stderr)
                 
                 # Check if it's a rate limit error
                 if "rate limit" in error_msg.lower() or "429" in error_msg:
-                    logger.warning("Rate limit detected, increasing backoff")
+                    print("⚠️ Rate limit detected, increasing backoff", file=sys.stderr)
                     backoff_time = min(RATE_LIMIT_BACKOFF_MAX, 5 * (retries + 1))  # Progressive backoff
+                    print(f"   Backing off for {backoff_time} seconds", file=sys.stderr)
                     time.sleep(backoff_time)
                 elif "timeout" in error_msg.lower():
-                    logger.warning("Timeout detected, retrying")
+                    print("⏰ Timeout detected, retrying", file=sys.stderr)
                     time.sleep(2)
                 else:
                     # For other errors, shorter backoff
+                    print("   Short backoff before retry", file=sys.stderr)
                     time.sleep(1)
                 
                 retries += 1
         
         # All retries exhausted
+        print(f"💥 All retries exhausted after {self.max_retries + 1} attempts", file=sys.stderr)
+        print(f"   Final error: {last_error}", file=sys.stderr)
         return False, "", f"API call failed after {self.max_retries + 1} attempts: {last_error}"
     
     def analyze_single_finding(self, 
@@ -160,6 +198,9 @@ class ClaudeAPIClient:
             prompt = self._generate_single_finding_prompt(finding, pr_context, custom_filtering_instructions)
             system_prompt = self._generate_system_prompt()
             
+
+            print("Single finding prompt", prompt,file=sys.stderr)
+            
             # Call Claude API
             success, response_text, error_msg = self.call_with_retry(
                 prompt=prompt,
@@ -170,13 +211,26 @@ class ClaudeAPIClient:
             if not success:
                 return False, {}, error_msg
             
+            # Log the raw response before parsing
+            print(f"📝 RAW CLAUDE RESPONSE FOR PARSING:", file=sys.stderr)
+            print(f"{response_text}", file=sys.stderr)
+            
             # Parse JSON response using json_parser
             success, analysis_result = parse_json_with_fallbacks(response_text, "Claude API response")
+            
+            # Log parsing results
+            print(f"🔍 JSON PARSING RESULTS:", file=sys.stderr)
+            print(f"   Parsing success: {success}", file=sys.stderr)
             if success:
-                logger.info("Successfully parsed Claude API response for single finding")
+                print(f"   Parsed result type: {type(analysis_result)}", file=sys.stderr)
+                print(f"   Parsed result keys: {list(analysis_result.keys()) if isinstance(analysis_result, dict) else 'N/A'}", file=sys.stderr)
+                print(f"📤 FULL PARSED RESULT:", file=sys.stderr)
+                print(f"{json.dumps(analysis_result, indent=2)}", file=sys.stderr)
+                print("✅ Successfully parsed Claude API response for single finding", file=sys.stderr)
                 return True, analysis_result, ""
             else:
-                # Fallback: return error
+                print("❌ Failed to parse JSON response", file=sys.stderr)
+                print(f"   Raw response that failed to parse: {response_text}", file=sys.stderr)
                 return False, {}, "Failed to parse JSON response"
                 
         except Exception as e:
