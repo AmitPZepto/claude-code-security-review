@@ -627,7 +627,10 @@ def main():
             'title': pr_data.get('title', ''),
             'description': pr_data.get('body', '')
         }
-        
+        print(f"[Debug] PR context: {pr_context}", file=sys.stderr)
+        print(f"[Debug] Original findings: {original_findings}", file=sys.stderr)
+        print(f"[Debug] Findings filter: {findings_filter}", file=sys.stderr)
+        print(f"[Debug] GitHub client: {github_client}", file=sys.stderr)
         # Apply findings filter (including final directory exclusion)
         kept_findings, excluded_findings, analysis_summary = apply_findings_filter(
             findings_filter, original_findings, pr_context, github_client
