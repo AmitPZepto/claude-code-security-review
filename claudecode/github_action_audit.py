@@ -85,8 +85,7 @@ class GitHubActionClient:
             print(f"File: {f['filename']}")
             unmasked_patch = f.get("patch", "No patch available")
             patch = gitmask_secrets_in_diff(unmasked_patch, verbose=False)
-            print(f"Masked patch: {patch}")
-            print("-" * 50)
+            print(f"Masked patch: {patch}",file=sys.stderr)
         return {
             'number': pr_data['number'],
             'title': pr_data['title'],
