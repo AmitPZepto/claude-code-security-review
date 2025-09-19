@@ -81,7 +81,7 @@ class GitHubActionClient:
         response = requests.get(files_url, headers=self.headers)
         response.raise_for_status()
         files_data = response.json()
-        for f in files:
+        for f in files_data:
             print(f"File: {f['filename']}")
             print(f.get("patch", "No patch available"))
             print("-" * 50)
