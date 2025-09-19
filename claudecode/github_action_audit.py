@@ -81,6 +81,10 @@ class GitHubActionClient:
         response = requests.get(files_url, headers=self.headers)
         response.raise_for_status()
         files_data = response.json()
+        for f in files:
+            print(f"File: {f['filename']}")
+            print(f.get("patch", "No patch available"))
+            print("-" * 50)
         return {
             'number': pr_data['number'],
             'title': pr_data['title'],
@@ -107,7 +111,7 @@ class GitHubActionClient:
                     'additions': f['additions'],
                     'deletions': f['deletions'],
                     'changes': f['changes'],
-                    'patch': f.get('patch', '')
+                    'patch': gitmask_secrets_in_diff(f.get('patch', ''),verbose=False)
                 }
                 for f in files_data
                 if not self._is_excluded(f['filename'])
