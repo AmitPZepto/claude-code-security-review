@@ -82,7 +82,6 @@ class GitHubActionClient:
         response.raise_for_status()
         files_data = response.json()
         for f in files_data:
-            print(f"File: {f['filename']}")
             unmasked_patch = f.get("patch", "No patch available")
             patch = gitmask_secrets_in_diff(unmasked_patch, verbose=False)
             print(f"Masked patch: {patch}",file=sys.stderr)
