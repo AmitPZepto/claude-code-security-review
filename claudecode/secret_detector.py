@@ -233,7 +233,7 @@ class SecretDetector:
                     self._log(f"   Found {occurrences} occurrence(s) in file")
 
                     # Replace the secret with a placeholder
-                    masked_content = masked_content.replace(secret_value, '[REDACTED_SECRET]')
+                    masked_content = masked_content.replace(secret_value, '[SENSITIVE_DATA_REMOVED]')
                     total_replacements += occurrences
 
                     # Track what was redacted
