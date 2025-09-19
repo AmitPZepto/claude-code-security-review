@@ -579,13 +579,7 @@ def main():
             
             # Apply secret masking only if secrets are detected
             masked_diff = gitmask_secrets_in_diff(unmaskedpr_diff, verbose=False)
-            
-            # Check if any secrets were actually masked
-            if '[REDACTED_SECRET]' in masked_diff:
-                pr_diff = masked_diff
-                # print(f"[Debug] Secrets detected and masked, using masked diff")
-            else:
-                pr_diff = unmaskedpr_diff
+            pr_diff = masked_diff
                 # print(f"[Debug] No secrets detected, using original diff")
 
             
