@@ -1,669 +1,379 @@
-#!/usr/bin/env python3
-"""
-Simplified PR Security Audit for GitHub Actions
-Runs Claude Code security audit on current working directory and outputs findings to stdout
-"""
+"""Claude API client for direct Anthropic API calls."""
 
 import os
-import sys
 import json
-import subprocess
-import requests
-from typing import Dict, Any, List, Tuple, Optional
+import time
+from typing import Dict, Any, Tuple, Optional
 from pathlib import Path
-import re
-import time 
+import sys
+from anthropic import Anthropic
 
-# Import existing components we can reuse
-from claudecode.prompts import get_security_audit_prompt
-from claudecode.findings_filter import FindingsFilter
-from claudecode.json_parser import parse_json_with_fallbacks
 from claudecode.constants import (
-    EXIT_CONFIGURATION_ERROR,
-    DEFAULT_CLAUDE_MODEL,
-    EXIT_SUCCESS,
-    EXIT_GENERAL_ERROR,
-    SUBPROCESS_TIMEOUT
+    DEFAULT_CLAUDE_MODEL, DEFAULT_TIMEOUT_SECONDS, DEFAULT_MAX_RETRIES,
+    RATE_LIMIT_BACKOFF_MAX, PROMPT_TOKEN_LIMIT,
 )
+from claudecode.json_parser import parse_json_with_fallbacks
 from claudecode.logger import get_logger
-from claudecode.secret_detector import gitmask_secrets_in_diff
 
 logger = get_logger(__name__)
 
-class ConfigurationError(ValueError):
-    """Raised when configuration is invalid or missing."""
-    pass
 
-class AuditError(ValueError):
-    """Raised when security audit operations fail."""
-    pass
-
-class GitHubActionClient:
-    """Simplified GitHub API client for GitHub Actions environment."""
+class ClaudeAPIClient:
+    """Client for calling Claude API directly for security analysis tasks."""
     
-    def __init__(self):
-        """Initialize GitHub client using environment variables."""
-        self.github_token = os.environ.get('GITHUB_TOKEN')
-        if not self.github_token:
-            raise ValueError("GITHUB_TOKEN environment variable required")
-            
-        self.headers = {
-            'Authorization': f'Bearer {self.github_token}',
-            'Accept': 'application/vnd.github.v3+json',
-            'X-GitHub-Api-Version': '2022-11-28'
-        }
-        
-        # Get excluded directories from environment
-        exclude_dirs = os.environ.get('EXCLUDE_DIRECTORIES', '')
-        self.excluded_dirs = [d.strip() for d in exclude_dirs.split(',') if d.strip()] if exclude_dirs else []
-        if self.excluded_dirs:
-            print(f"[Debug] Excluded directories: {self.excluded_dirs}", file=sys.stderr)
-    
-    def get_pr_data(self, repo_name: str, pr_number: int) -> Dict[str, Any]:
-        """Get PR metadata and files from GitHub API.
+    def __init__(self, 
+                 model: Optional[str] = None,
+                 api_key: Optional[str] = None,
+                 timeout_seconds: Optional[int] = None,
+                 max_retries: Optional[int] = None):
+        """Initialize Claude API client.
         
         Args:
-            repo_name: Repository name in format "owner/repo"
-            pr_number: Pull request number
-            
+            model: Claude model to use
+            api_key: Anthropic API key (if None, reads from ANTHROPIC_API_KEY env var)
+            timeout_seconds: Request timeout in seconds
+            max_retries: Maximum retry attempts for API calls
+        """
+        self.model = model or DEFAULT_CLAUDE_MODEL
+        self.timeout_seconds = timeout_seconds or DEFAULT_TIMEOUT_SECONDS
+        self.max_retries = max_retries or DEFAULT_MAX_RETRIES
+        
+        # Get API key from environment or parameter
+        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not self.api_key:
+            raise ValueError(
+                "No Anthropic API key found. Please set ANTHROPIC_API_KEY environment variable "
+                "or provide api_key parameter."
+            )
+        
+        # Initialize Anthropic client
+        self.client = Anthropic(api_key=self.api_key)
+        logger.info("Claude API client initialized successfully")
+    
+    def validate_api_access(self) -> Tuple[bool, str]:
+        """Validate that API access is working.
+        
         Returns:
-            Dictionary containing PR data
+            Tuple of (success, error_message)
         """
-        # Get PR metadata
-        pr_url = f"https://api.github.com/repos/{repo_name}/pulls/{pr_number}"
-        response = requests.get(pr_url, headers=self.headers)
-        response.raise_for_status()
-        pr_data = response.json()
-        
-        # Get PR files with pagination support
-        files_url = f"https://api.github.com/repos/{repo_name}/pulls/{pr_number}/files?per_page=100"
-        response = requests.get(files_url, headers=self.headers)
-        response.raise_for_status()
-        files_data = response.json()
-        
-        return {
-            'number': pr_data['number'],
-            'title': pr_data['title'],
-            'body': pr_data.get('body', ''),
-            'user': pr_data['user']['login'],
-            'created_at': pr_data['created_at'],
-            'updated_at': pr_data['updated_at'],
-            'state': pr_data['state'],
-            'head': {
-                'ref': pr_data['head']['ref'],
-                'sha': pr_data['head']['sha'],
-                'repo': {
-                    'full_name': pr_data['head']['repo']['full_name'] if pr_data['head']['repo'] else repo_name
-                }
-            },
-            'base': {
-                'ref': pr_data['base']['ref'],
-                'sha': pr_data['base']['sha']
-            },
-            'files': [
-                {
-                    'filename': f['filename'],
-                    'status': f['status'],
-                    'additions': f['additions'],
-                    'deletions': f['deletions'],
-                    'changes': f['changes'],
-                    'patch': f.get('patch', '')
-                }
-                for f in files_data
-                if not self._is_excluded(f['filename'])
-            ],
-            'additions': pr_data['additions'],
-            'deletions': pr_data['deletions'],
-            'changed_files': pr_data['changed_files']
-        }
-    
-    def get_pr_diff(self, repo_name: str, pr_number: int) -> str:
-        """Get complete PR diff in unified format.
-        
-        Args:
-            repo_name: Repository name in format "owner/repo"
-            pr_number: Pull request number
-            
-        Returns:
-            Complete PR diff in unified format
-        """
-        url = f"https://api.github.com/repos/{repo_name}/pulls/{pr_number}"
-        headers = dict(self.headers)
-        headers['Accept'] = 'application/vnd.github.diff'
-        
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        
-        return self._filter_generated_files(response.text)
-    
-    def _is_excluded(self, filepath: str) -> bool:
-        """Check if a file should be excluded based on directory patterns."""
-        for excluded_dir in self.excluded_dirs:
-            # Normalize excluded directory (remove leading ./ if present)
-            if excluded_dir.startswith('./'):
-                normalized_excluded = excluded_dir[2:]
-            else:
-                normalized_excluded = excluded_dir
-            
-            # Check if file starts with excluded directory
-            if filepath.startswith(excluded_dir + '/'):
-                return True
-            if filepath.startswith(normalized_excluded + '/'):
-                return True
-            
-            # Check if excluded directory appears anywhere in the path
-            if '/' + normalized_excluded + '/' in filepath:
-                return True
-            
-        return False
-    
-    def _filter_generated_files(self, diff_text: str) -> str:
-        """Filter out generated files and excluded directories from diff content."""
-        
-        file_sections = re.split(r'(?=^diff --git)', diff_text, flags=re.MULTILINE)
-        filtered_sections = []
-        
-        for section in file_sections:
-            if not section.strip():
-                continue
-                
-            # Skip generated files
-            if ('@generated by' in section or 
-                '@generated' in section or 
-                'Code generated by OpenAPI Generator' in section or
-                'Code generated by protoc-gen-go' in section):
-                continue
-            
-            # Extract filename from diff header
-            match = re.match(r'^diff --git a/(.*?) b/', section)
-            if match:
-                filename = match.group(1)
-                if self._is_excluded(filename):
-                    print(f"[Debug] Filtering out excluded file: {filename}", file=sys.stderr)
-                    continue
-            
-            filtered_sections.append(section)
-        
-        return ''.join(filtered_sections)
-
-
-class SimpleClaudeRunner:
-    """Simplified Claude Code runner for GitHub Actions."""
-    
-    def __init__(self, timeout_minutes: Optional[int] = None):
-        """Initialize Claude runner.
-        
-        Args:
-            timeout_minutes: Timeout for Claude execution (defaults to SUBPROCESS_TIMEOUT)
-        """
-        if timeout_minutes is not None:
-            self.timeout_seconds = timeout_minutes * 60
-        else:
-            self.timeout_seconds = SUBPROCESS_TIMEOUT
-    
-    def run_security_audit(self, repo_dir: Path, prompt: str) -> Tuple[bool, str, Dict[str, Any]]:
-        """Run Claude Code security audit.
-        
-        Args:
-            repo_dir: Path to repository directory
-            prompt: Security audit prompt
-            
-        Returns:
-            Tuple of (success, error_message, parsed_results)
-        """
-        if not repo_dir.exists():
-            return False, f"Repository directory does not exist: {repo_dir}", {}
-        
-        # Check prompt size
-        prompt_size = len(prompt.encode('utf-8'))
-        if prompt_size > 1024 * 1024:  # 1MB
-            print(f"[Warning] Large prompt size: {prompt_size / 1024 / 1024:.2f}MB", file=sys.stderr)
-        
         try:
-            # Construct Claude Code command
-            # Use stdin for prompt to avoid "argument list too long" error
-            cmd = [
-                'claude',
-                '--output-format', 'json',
-                '--model', DEFAULT_CLAUDE_MODEL
-            ]
-            
-            # Run Claude Code with retry logic
-            NUM_RETRIES = 3
-            for attempt in range(NUM_RETRIES):
-                print(f"Starting CMd process...{cmd}", file=sys.stderr) 
-                print(f"Starting prompt process...{prompt}", file=sys.stderr) 
-                result = subprocess.run(
-                    cmd,
-                    input=prompt,  # Pass prompt via stdin
-                    cwd=repo_dir,
-                    capture_output=True,
-                    text=True,
-                    timeout=self.timeout_seconds
-                )
-                
-                if result.returncode != 0:
-                    if attempt == NUM_RETRIES - 1:
-                        error_details = f"Claude Code execution failed with return code {result.returncode}\n"
-                        error_details += f"Stderr: {result.stderr}\n"
-                        error_details += f"Stdout: {result.stdout[:500]}..."  # First 500 chars
-                        return False, error_details, {}
-                    else:
-                        time.sleep(5*attempt)
-                        # Note: We don't do exponential backoff here to keep the runtime reasonable
-                        continue  # Retry
-                
-                # Parse JSON output
-                success, parsed_result = parse_json_with_fallbacks(result.stdout, "Claude Code output")
-                
-                if success:
-                    # Check for "Prompt is too long" error that should trigger retry without diff
-                    if (isinstance(parsed_result, dict) and 
-                        parsed_result.get('type') == 'result' and 
-                        parsed_result.get('subtype') == 'success' and
-                        parsed_result.get('is_error') and
-                        parsed_result.get('result') == 'Prompt is too long'):
-                        return False, "PROMPT_TOO_LONG", {}
-                    
-                    # Check for error_during_execution that should trigger retry
-                    if (isinstance(parsed_result, dict) and 
-                        parsed_result.get('type') == 'result' and 
-                        parsed_result.get('subtype') == 'error_during_execution' and
-                        attempt == 0):
-                        continue  # Retry
-                    
-                    # Extract security findings
-                    parsed_results = self._extract_security_findings(parsed_result)
-                    return True, "", parsed_results
-                else:
-                    if attempt == 0:
-                        continue  # Retry once
-                    else:
-                        return False, "Failed to parse Claude output", {}
-            
-            return False, "Unexpected error in retry logic", {}
-            
-        except subprocess.TimeoutExpired:
-            return False, f"Claude Code execution timed out after {self.timeout_seconds // 60} minutes", {}
-        except Exception as e:
-            return False, f"Claude Code execution error: {str(e)}", {}
-    
-    def _extract_security_findings(self, claude_output: Any) -> Dict[str, Any]:
-        """Extract security findings from Claude's JSON response."""
-        if isinstance(claude_output, dict):
-            # Only accept Claude Code wrapper with result field
-            # Direct format without wrapper is not supported
-            if 'result' in claude_output:
-                result_text = claude_output['result']
-                if isinstance(result_text, str):
-                    # Try to extract JSON from the result text
-                    success, result_json = parse_json_with_fallbacks(result_text, "Claude result text")
-                    if success and result_json and 'findings' in result_json:
-                        return result_json
-        
-        # Return empty structure if no findings found
-        return {
-            'findings': [],
-            'analysis_summary': {
-                'files_reviewed': 0,
-                'high_severity': 0,
-                'medium_severity': 0,
-                'low_severity': 0,
-                'review_completed': False,
-            }
-        }
-    
-    
-    def validate_claude_available(self) -> Tuple[bool, str]:
-        """Validate that Claude Code is available."""
-        try:
-            result = subprocess.run(
-                ['claude', '--version'],
-                capture_output=True,
-                text=True,
+            # Simple test call to verify API access
+            self.client.messages.create(
+                model="claude-3-5-haiku-20241022",
+                max_tokens=10,
+                messages=[{"role": "user", "content": "Hello"}],
                 timeout=10
             )
+            logger.info("Claude API access validated successfully")
+            return True, ""
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Claude API validation failed: {error_msg}")
+            return False, f"API validation failed: {error_msg}"
+    
+    def call_with_retry(self, 
+                       prompt: str,
+                       system_prompt: Optional[str] = None,
+                       max_tokens: int = PROMPT_TOKEN_LIMIT) -> Tuple[bool, str, str]:
+        """Make Claude API call with retry logic.
+        
+        Args:
+            prompt: User prompt
+            system_prompt: Optional system prompt
+            max_tokens: Maximum tokens to generate
             
-            if result.returncode == 0:
-                # Also check if API key is configured
-                api_key = os.environ.get('ANTHROPIC_API_KEY', '')
-                if not api_key:
-                    return False, "ANTHROPIC_API_KEY environment variable is not set"
-                return True, ""
+        Returns:
+            Tuple of (success, response_text, error_message)
+        """
+        retries = 0
+        last_error = None
+        
+        while retries <= self.max_retries:
+            try:
+                logger.info(f"Claude API call attempt {retries + 1}/{self.max_retries + 1}")
+                
+                # Prepare messages
+                messages = [{"role": "user", "content": prompt}]
+                
+                # Build API call parameters
+                api_params = {
+                    "model": self.model,
+                    "max_tokens": max_tokens,
+                    "messages": messages,
+                    "timeout": self.timeout_seconds
+                }
+                
+                if system_prompt:
+                    api_params["system"] = system_prompt
+                
+                # Make API call
+                start_time = time.time()
+                response = self.client.messages.create(**api_params)
+                duration = time.time() - start_time
+                
+                # Extract text from response
+                response_text = ""
+                for content_block in response.content:
+                    if hasattr(content_block, 'text'):
+                        response_text += content_block.text
+                
+                logger.info(f"Claude API call successful in {duration:.1f}s")
+                return True, response_text, ""
+                
+            except Exception as e:
+                error_msg = str(e)
+                last_error = error_msg
+                logger.error(f"Claude API call failed: {error_msg}")
+                
+                # Check if it's a rate limit error
+                if "rate limit" in error_msg.lower() or "429" in error_msg:
+                    logger.warning("Rate limit detected, increasing backoff")
+                    backoff_time = min(RATE_LIMIT_BACKOFF_MAX, 5 * (retries + 1))  # Progressive backoff
+                    time.sleep(backoff_time)
+                elif "timeout" in error_msg.lower():
+                    logger.warning("Timeout detected, retrying")
+                    time.sleep(2)
+                else:
+                    # For other errors, shorter backoff
+                    time.sleep(1)
+                
+                retries += 1
+        
+        # All retries exhausted
+        return False, "", f"API call failed after {self.max_retries + 1} attempts: {last_error}"
+    
+    def analyze_single_finding(self, 
+                              finding: Dict[str, Any], 
+                              pr_context: Optional[Dict[str, Any]] = None,
+                              custom_filtering_instructions: Optional[str] = None) -> Tuple[bool, Dict[str, Any], str]:
+        """Analyze a single security finding to filter false positives using Claude API.
+        
+        Args:
+            finding: Single security finding to analyze
+            pr_context: Optional PR context for better analysis
+            
+        Returns:
+            Tuple of (success, analysis_result, error_message)
+        """
+        try:
+            # Generate analysis prompt with file content
+            prompt = self._generate_single_finding_prompt(finding, pr_context, custom_filtering_instructions)
+            system_prompt = self._generate_system_prompt()
+            
+
+            print("Single finding prompt", prompt,file=sys.stderr)
+            
+            # Call Claude API
+            success, response_text, error_msg = self.call_with_retry(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                max_tokens=PROMPT_TOKEN_LIMIT 
+            )
+            
+            if not success:
+                return False, {}, error_msg
+            
+            # Parse JSON response using json_parser
+            success, analysis_result = parse_json_with_fallbacks(response_text, "Claude API response")
+            if success:
+                logger.info("Successfully parsed Claude API response for single finding")
+                return True, analysis_result, ""
             else:
-                error_msg = f"Claude Code returned exit code {result.returncode}"
-                if result.stderr:
-                    error_msg += f". Stderr: {result.stderr}"
-                if result.stdout:
-                    error_msg += f". Stdout: {result.stdout}"
-                return False, error_msg
+                # Fallback: return error
+                return False, {}, "Failed to parse JSON response"
                 
-        except subprocess.TimeoutExpired:
-            return False, "Claude Code command timed out"
-        except FileNotFoundError:
-            return False, "Claude Code is not installed or not in PATH"
         except Exception as e:
-            return False, f"Failed to check Claude Code: {str(e)}"
+            logger.exception(f"Error during single finding security analysis: {str(e)}")
+            return False, {}, f"Single finding security analysis failed: {str(e)}"
 
-
-
-
-def get_environment_config() -> Tuple[str, int]:
-    """Get and validate environment configuration.
     
-    Returns:
-        Tuple of (repo_name, pr_number)
-        
-    Raises:
-        ConfigurationError: If required environment variables are missing or invalid
-    """
-    repo_name = os.environ.get('GITHUB_REPOSITORY')
-    pr_number_str = os.environ.get('PR_NUMBER')
-    
-    if not repo_name:
-        raise ConfigurationError('GITHUB_REPOSITORY environment variable required')
-    
-    if not pr_number_str:
-        raise ConfigurationError('PR_NUMBER environment variable required')
-    
-    try:
-        pr_number = int(pr_number_str)
-    except ValueError:
-        raise ConfigurationError(f'Invalid PR_NUMBER: {pr_number_str}')
-        
-    return repo_name, pr_number
+    def _generate_system_prompt(self) -> str:
+        """Generate system prompt for security analysis."""
+        return """You are a security expert reviewing findings from an automated code audit tool.
+Your task is to filter out false positives and low-signal findings to reduce alert fatigue.
+You must maintain high recall (don't miss real vulnerabilities) while improving precision.
 
-
-def initialize_clients() -> Tuple[GitHubActionClient, SimpleClaudeRunner]:
-    """Initialize GitHub and Claude clients.
+Respond ONLY with valid JSON in the exact format specified in the user prompt.
+Do not include explanatory text, markdown formatting, or code blocks."""
     
-    Returns:
-        Tuple of (github_client, claude_runner)
+    def _generate_single_finding_prompt(self, 
+                                       finding: Dict[str, Any], 
+                                       pr_context: Optional[Dict[str, Any]] = None,
+                                       custom_filtering_instructions: Optional[str] = None) -> str:
+        """Generate prompt for analyzing a single security finding.
         
-    Raises:
-        ConfigurationError: If client initialization fails
-    """
-    try:
-        github_client = GitHubActionClient()
-    except Exception as e:
-        raise ConfigurationError(f'Failed to initialize GitHub client: {str(e)}')
-    
-    try:
-        claude_runner = SimpleClaudeRunner()
-    except Exception as e:
-        raise ConfigurationError(f'Failed to initialize Claude runner: {str(e)}')
+        Args:
+            finding: Single security finding
+            pr_context: Optional PR context
+            
+        Returns:
+            Formatted prompt string
+        """
+        pr_info = ""
+        if pr_context and isinstance(pr_context, dict):
+            pr_info = f"""
+PR Context:
+- Repository: {pr_context.get('repo_name', 'unknown')}
+- PR #{pr_context.get('pr_number', 'unknown')}
+- Title: {pr_context.get('title', 'unknown')}
+- Description: {(pr_context.get('description') or 'No description')[:500]}...
+"""
         
-    return github_client, claude_runner
+        # Get file content if available
+        file_path = finding.get('file', '')
+        file_content = ""
+        if file_path:
+            success, content, error = self._read_file(file_path)
+            if success:
+                file_content = f"""
 
+File Content ({file_path}):
+```
+{content}
+```"""
+            else:
+                file_content = f"""
 
-def initialize_findings_filter(custom_filtering_instructions: Optional[str] = None) -> FindingsFilter:
-    """Initialize findings filter based on environment configuration.
-    
-    Args:
-        custom_filtering_instructions: Optional custom filtering instructions
+File Content ({file_path}): Error reading file - {error}
+"""
         
-    Returns:
-        FindingsFilter instance
+        finding_json = json.dumps(finding, indent=2)
         
-    Raises:
-        ConfigurationError: If filter initialization fails
-    """
-    try:
-        # Check if we should use Claude API filtering
-        use_claude_filtering = os.environ.get('ENABLE_CLAUDE_FILTERING', 'false').lower() == 'true'
-        api_key = os.environ.get('ANTHROPIC_API_KEY')
-        
-        if use_claude_filtering and api_key:
-            # Use full filtering with Claude API
-            return FindingsFilter(
-                use_hard_exclusions=True,
-                use_claude_filtering=True,
-                api_key=api_key,
-                custom_filtering_instructions=custom_filtering_instructions
-            )
+        # Use custom filtering instructions if provided, otherwise use defaults
+        if custom_filtering_instructions:
+            filtering_section = custom_filtering_instructions
         else:
-            # Fallback to filtering with hard rules only
-            return FindingsFilter(
-                use_hard_exclusions=True,
-                use_claude_filtering=False
-            )
-    except Exception as e:
-        raise ConfigurationError(f'Failed to initialize findings filter: {str(e)}')
+            filtering_section = """HARD EXCLUSIONS - Automatically exclude findings matching these patterns:
+1. Denial of Service (DOS) vulnerabilities or resource exhaustion attacks
+2. Secrets/credentials stored on disk (these are managed separately) 
+3. Rate limiting concerns or service overload scenarios (services don't need to implement rate limiting)
+4. Memory consumption or CPU exhaustion issues
+5. Lack of input validation on non-security-critical fields without proven security impact
+6. Input sanitization concerns for github action workflows
+7. A lack of hardening measures. Code is not expected to implement all security best practices, just avoid obvious vulnerabilities.
+8. Race conditions or timing attacks that are theoretical rather than practical issues. Only report a race condition if it is extremely problematic.
+9. Vulnerabilities related to outdated third-party libraries. These are managed separately and should not be reported here.
+10. Memory safety issues such as buffer overflows or use-after-free-vulnerabilities are impossible in rust. Do not report memory safety issues in rust code.
+11. Files that are only unit tests or only used as part of running tests.
+12. Log spoofing concerns. Outputing un-sanitized user input to logs is not a vulnerability.
+13. SSRF vulnerabilities that only control the path. SSRF is only a concern if it can control the host or protocol.
+14. Including user-controlled content in AI system prompts is not a vulnerability. In general, the inclusion of user input in an AI prompt is not a vulnerability.
+15. Do not report issues related to adding a dependency to a project that is not available from the relevant package repository. Depending on internal libraries that are not publicly available is not a vulnerability.
+16. Do not report issues that cause the code to crash, but are not actually a vulnerability. E.g. a variable that is undefined or null is not a vulnerability.
+
+SIGNAL QUALITY CRITERIA - For remaining findings, assess:
+1. Is there a concrete, exploitable vulnerability with a clear attack path?
+2. Does this represent a real security risk vs theoretical best practice?
+3. Are there specific code locations and reproduction steps?
+4. Would this finding be actionable for a security team?
+
+PRECEDENTS - 
+1. Logging high value secrets in plaintext is a vulnerability. Otherwise, do not report issues around theoretical exposures of secrets. Logging URLs is assumed to be safe. Logging request headers is assumed to be dangerous since they likely contain credentials.
+2. UUIDs can be assumed to be unguessable and do not need to be validated. If a vulnerabilities requires guessing a UUID, it is not a valid vulnerability.
+3. Audit logs are not a critical security feature and should not be reported as a vulnerability if they are missing or modified.
+4. Environment variables and CLI flags are trusted values. Attackers are not able to modify them in a secure environment. Any attack that relies on controlling an environment variable is invalid.
+5. Resource management issues such as memory or file descriptor leaks are not valid.
+6. Subtle or low impact web vulnerabilities such as tabnabbing, XS-Leaks, prototype pollution, and open redirects are not valid.
+7. Vulnerabilities related to outdated third-party libraries. These are managed separately and should not be reported here.
+8. React is generally secure against XSS. React does not need to sanitize or escape user input unless it is using dangerouslySetInnerHTML or similar methods. Do not report XSS vulnerabilities in React components or tsx files unless they are using unsafe methods.
+9. Most vulnerabilities in github action workflows are not exploitable in practice. Before validating a github action workflow vulnerability ensure it is concrete and has a very specific attack path.
+10. A lack of permission checking or authentication in client-side TS code is not a vulnerability. Client-side code is not trusted and does not need to implement these checks, they are handled on the server-side. The same applies to all flows that send untrusted data to the backend, the backend is responsible for validating and sanitizing all inputs.
+11. Only include MEDIUM findings if they are obvious and concrete issues.
+12. Most vulnerabilities in ipython notebooks (*.ipynb files) are not exploitable in practice. Before validating a notebook vulnerability ensure it is concrete and has a very specific attack path.
+13. Logging non-PII data is not a vulnerability even if the data may be sensitive. Only report logging vulnerabilities if they expose sensitive information such as secrets, passwords, or personally identifiable information (PII).
+14. Command injection vulnerabilities in shell scripts are generally not exploitable in practice since shell scripts generally do not run with untrusted user input. Only report command injection vulnerabilities in shell scripts if they are concrete and have a very specific attack path for untrusted input.
+15. SSRF (Server-Side Request Forgery) vulnerabilities in client-side JavaScript/TypeScript files (.js, .ts, .tsx, .jsx) are not valid since client-side code cannot make server-side requests that would bypass firewalls or access internal resources. Only report SSRF in server-side code (e.g. Python or JS that is known to run on the server-side). The same logic applies to path-traversal attacks, they are not a problem in client-side JS.
+16. Path traversal attacks using ../ are generally not a problem when triggering HTTP requests. These are generally only relevant when reading files where the ../ may allow accessing unintended files.
+17. Injecting into log queries is generally not an issue. Only report this if the injection will definitely lead to exposing sensitive data to external users."""
+        
+        return f"""I need you to analyze a security finding from an automated code audit and determine if it's a false positive.
+
+{pr_info}
+
+{filtering_section}
+
+Assign a confidence score from 1-10:
+- 1-3: Low confidence, likely false positive or noise
+- 4-6: Medium confidence, needs investigation  
+- 7-10: High confidence, likely true vulnerability
+
+Finding to analyze:
+```json
+{finding_json}
+```
+{file_content}
+
+Respond with EXACTLY this JSON structure (no markdown, no code blocks):
+{{
+  "original_severity": "HIGH",
+  "confidence_score": 8,
+  "keep_finding": true,
+  "exclusion_reason": null,
+  "justification": "Clear SQL injection vulnerability with specific exploit path"
+}}"""
+
+    
+    def _read_file(self, file_path: str) -> Tuple[bool, str, str]:
+        """Read a file and format it with line numbers.
+        
+        Args:
+            file_path: Path to the file to read
+            
+        Returns:
+            Tuple of (success, formatted_content, error_message)
+        """
+        try:
+            # Check if REPO_PATH is set and use it as base path
+            repo_path = os.environ.get('REPO_PATH')
+            if repo_path:
+                # Convert file_path to Path and check if it's absolute
+                path = Path(file_path)
+                if not path.is_absolute():
+                    # Make it relative to REPO_PATH
+                    path = Path(repo_path) / file_path
+            else:
+                path = Path(file_path)
+            
+            if not path.exists():
+                return False, "", f"File not found: {path}"
+            
+            if not path.is_file():
+                return False, "", f"Path is not a file: {path}"
+            
+            # Read file with error handling for encoding issues
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except UnicodeDecodeError:
+                # Try with latin-1 encoding as fallback
+                with open(path, 'r', encoding='latin-1') as f:
+                    content = f.read()
+            
+            return True, content, ""
+            
+        except Exception as e:
+            error_msg = f"Error reading file {file_path}: {str(e)}"
+            logger.error(error_msg)
+            return False, "", error_msg
 
 
-
-def run_security_audit(claude_runner: SimpleClaudeRunner, prompt: str) -> Dict[str, Any]:
-    """Run the security audit with Claude Code.
+def get_claude_api_client(model: str = DEFAULT_CLAUDE_MODEL,
+                         api_key: Optional[str] = None,
+                         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> ClaudeAPIClient:
+    """Convenience function to get Claude API client.
     
     Args:
-        claude_runner: Claude runner instance
-        prompt: The security audit prompt
+        model: Claude model identifier
+        api_key: Optional API key (reads from environment if not provided)
+        timeout_seconds: API call timeout
         
     Returns:
-        Audit results dictionary
-        
-    Raises:
-        AuditError: If the audit fails
+        Initialized ClaudeAPIClient instance
     """
-    # Get repo directory from environment or use current directory
-    repo_path = os.environ.get('REPO_PATH')
-    repo_dir = Path(repo_path) if repo_path else Path.cwd()
-    success, error_msg, results = claude_runner.run_security_audit(repo_dir, prompt)
-    
-    if not success:
-        raise AuditError(f'Security audit failed: {error_msg}')
-        
-    return results
-
-
-def apply_findings_filter(findings_filter, original_findings: List[Dict[str, Any]], 
-                         pr_context: Dict[str, Any], github_client: GitHubActionClient) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
-    """Apply findings filter to reduce false positives.
-    
-    Args:
-        findings_filter: Filter instance
-        original_findings: Original findings from audit
-        pr_context: PR context information
-        github_client: GitHub client with exclusion logic
-        
-    Returns:
-        Tuple of (kept_findings, excluded_findings, analysis_summary)
-    """
-    # Apply FindingsFilter
-    filter_success, filter_results, filter_stats = findings_filter.filter_findings(
-        original_findings, pr_context
+    return ClaudeAPIClient(
+        model=model,
+        api_key=api_key,
+        timeout_seconds=timeout_seconds
     )
-    
-    if filter_success:
-        kept_findings = filter_results.get('filtered_findings', [])
-        excluded_findings = filter_results.get('excluded_findings', [])
-        analysis_summary = filter_results.get('analysis_summary', {})
-    else:
-        # Filtering failed, keep all findings
-        kept_findings = original_findings
-        excluded_findings = []
-        analysis_summary = {}
-    
-    # Apply final directory exclusion filtering
-    final_kept_findings = []
-    directory_excluded_findings = []
-    
-    for finding in kept_findings:
-        if _is_finding_in_excluded_directory(finding, github_client):
-            directory_excluded_findings.append(finding)
-        else:
-            final_kept_findings.append(finding)
-    
-    # Update excluded findings list
-    all_excluded_findings = excluded_findings + directory_excluded_findings
-    
-    # Update analysis summary with directory filtering stats
-    analysis_summary['directory_excluded_count'] = len(directory_excluded_findings)
-    
-    return final_kept_findings, all_excluded_findings, analysis_summary
 
 
-def _is_finding_in_excluded_directory(finding: Dict[str, Any], github_client: GitHubActionClient) -> bool:
-    """Check if a finding references a file in an excluded directory.
-    
-    Args:
-        finding: Security finding dictionary
-        github_client: GitHub client with exclusion logic
-        
-    Returns:
-        True if finding should be excluded, False otherwise
-    """
-    file_path = finding.get('file', '')
-    if not file_path:
-        return False
-    
-    return github_client._is_excluded(file_path)
-
-
-def main():
-    """Main execution function for GitHub Action."""
-    try:
-        # Get environment configuration
-        try:
-            repo_name, pr_number = get_environment_config()
-        except ConfigurationError as e:
-            print(json.dumps({'error': str(e)}))
-            sys.exit(EXIT_CONFIGURATION_ERROR)
-        
-        # Load custom filtering instructions if provided
-        custom_filtering_instructions = None
-        filtering_file = os.environ.get('FALSE_POSITIVE_FILTERING_INSTRUCTIONS', '')
-        if filtering_file and Path(filtering_file).exists():
-            try:
-                with open(filtering_file, 'r', encoding='utf-8') as f:
-                    custom_filtering_instructions = f.read()
-                    logger.info(f"Loaded custom filtering instructions from {filtering_file}")
-            except Exception as e:
-                logger.warning(f"Failed to read filtering instructions file {filtering_file}: {e}")
-        
-        # Load custom security scan instructions if provided
-        custom_scan_instructions = None
-        scan_file = os.environ.get('CUSTOM_SECURITY_SCAN_INSTRUCTIONS', '')
-        if scan_file and Path(scan_file).exists():
-            try:
-                with open(scan_file, 'r', encoding='utf-8') as f:
-                    custom_scan_instructions = f.read()
-                    logger.info(f"Loaded custom security scan instructions from {scan_file}")
-            except Exception as e:
-                logger.warning(f"Failed to read security scan instructions file {scan_file}: {e}")
-        
-        # Initialize components
-        try:
-            github_client, claude_runner = initialize_clients()
-        except ConfigurationError as e:
-            print(json.dumps({'error': str(e)}))
-            sys.exit(EXIT_CONFIGURATION_ERROR)
-            
-        # Initialize findings filter
-        try:
-            findings_filter = initialize_findings_filter(custom_filtering_instructions)
-        except ConfigurationError as e:
-            print(json.dumps({'error': str(e)}))
-            sys.exit(EXIT_CONFIGURATION_ERROR)
-        
-        # Validate Claude Code is available
-        claude_ok, claude_error = claude_runner.validate_claude_available()
-        if not claude_ok:
-            print(json.dumps({'error': f'Claude Code not available: {claude_error}'}))
-            sys.exit(EXIT_GENERAL_ERROR)
-        
-        # Get PR data
-        try:
-            pr_data = github_client.get_pr_data(repo_name, pr_number)
-
-            # pr_diff = github_client.get_pr_diff(repo_name, pr_number)
-            unmaskedpr_diff = github_client.get_pr_diff(repo_name, pr_number)
-
-            masked_diff = gitmask_secrets_in_diff(unmaskedpr_diff, verbose=False)
-            pr_diff = masked_diff
-            
-            # Check if any secrets were actually masked
-            # if '[REDACTED_SECRET]' in masked_diff:
-            #     pr_diff = masked_diff
-            #     # print(f"[Debug] Secrets detected and masked, using masked diff")
-
-            # else:
-            #     pr_diff = unmaskedpr_diff
-            #     # print(f"PR diff_masked: {pr_diff}")
-
-
-            # # print(f"[Debug] PR diff_masked: {pr_diff}")
-            # # print(f"[Debug] PR diff_unmasked: {unmaskedpr_diff}")
-
-            
-        except Exception as e:
-            print(json.dumps({'error': f'Failed to fetch PR data: {str(e)}'}))
-            sys.exit(EXIT_GENERAL_ERROR)
-                
-        # Generate security audit prompt
-        prompt = get_security_audit_prompt(pr_data, pr_diff, custom_scan_instructions=custom_scan_instructions)
-        print(f"Starting audit process...{prompt}", file=sys.stderr)        # logger.info(f"Security audit prompt:\n{prompt}")        # Run Claude Code security audit
-
-        
-        # Run Claude Code security audit
-        # Get repo directory from environment or use current directory
-        repo_path = os.environ.get('REPO_PATH')
-        repo_dir = Path(repo_path) if repo_path else Path.cwd()
-        success, error_msg, results = claude_runner.run_security_audit(repo_dir, prompt)
-        
-        # If prompt is too long, retry without diff
-        if not success and error_msg == "PROMPT_TOO_LONG":
-            print(f"[Info] Prompt too long, retrying without diff. Original prompt length: {len(prompt)} characters", file=sys.stderr)
-            prompt_without_diff = get_security_audit_prompt(pr_data, pr_diff, include_diff=False, custom_scan_instructions=custom_scan_instructions)
-            print(f"[Info] New prompt length: {len(prompt_without_diff)} characters", file=sys.stderr)
-            success, error_msg, results = claude_runner.run_security_audit(repo_dir, prompt_without_diff)
-        
-        if not success:
-            print(json.dumps({'error': f'Security audit failed: {error_msg}'}))
-            sys.exit(EXIT_GENERAL_ERROR)
-        
-        # Filter findings to reduce false positives
-        original_findings = results.get('findings', [])
-        
-        # Prepare PR context for better filtering
-        pr_context = {
-            'repo_name': repo_name,
-            'pr_number': pr_number,
-            'title': pr_data.get('title', ''),
-            'description': pr_data.get('body', '')
-        }
-        
-        # Apply findings filter (including final directory exclusion)
-        kept_findings, excluded_findings, analysis_summary = apply_findings_filter(
-            findings_filter, original_findings, pr_context, github_client
-        )
-        
-        # Prepare output
-        output = {
-            'pr_number': pr_number,
-            'repo': repo_name,
-            'findings': kept_findings,
-            'analysis_summary': results.get('analysis_summary', {}),
-            'filtering_summary': {
-                'total_original_findings': len(original_findings),
-                'excluded_findings': len(excluded_findings),
-                'kept_findings': len(kept_findings),
-                'filter_analysis': analysis_summary,
-                'excluded_findings_details': excluded_findings  # Include full details of what was filtered
-            }
-        }
-        
-        # Output JSON to stdout
-        print(json.dumps(output, indent=2))
-        
-        # Exit with appropriate code
-        high_severity_count = len([f for f in kept_findings if f.get('severity', '').upper() == 'HIGH'])
-        sys.exit(EXIT_GENERAL_ERROR if high_severity_count > 0 else EXIT_SUCCESS)
-        
-    except Exception as e:
-        print(json.dumps({'error': f'Unexpected error: {str(e)}'}))
-        sys.exit(EXIT_CONFIGURATION_ERROR)
-
-
-if __name__ == '__main__':
-    main()
