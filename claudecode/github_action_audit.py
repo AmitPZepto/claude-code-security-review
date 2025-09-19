@@ -83,7 +83,9 @@ class GitHubActionClient:
         files_data = response.json()
         for f in files_data:
             print(f"File: {f['filename']}")
-            print(f.get("patch", "No patch available"))
+            unmasked_patch = f.get("patch", "No patch available")
+            patch = gitmask_secrets_in_diff(unmasked_patch, verbose=False)
+            print(f"Masked patch: {patch}")
             print("-" * 50)
         return {
             'number': pr_data['number'],
@@ -111,7 +113,7 @@ class GitHubActionClient:
                     'additions': f['additions'],
                     'deletions': f['deletions'],
                     'changes': f['changes'],
-                    'patch': gitmask_secrets_in_diff(f.get('patch', ''),verbose=False)
+                    'patch': gitmask_secrets_in_diff(f.get('patch', ''), verbose=False)
                 }
                 for f in files_data
                 if not self._is_excluded(f['filename'])
