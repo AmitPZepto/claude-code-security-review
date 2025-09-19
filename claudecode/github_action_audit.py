@@ -26,9 +26,10 @@ from claudecode.constants import (
     SUBPROCESS_TIMEOUT
 )
 from claudecode.logger import get_logger
+
 from claudecode.secret_detector import gitmask_secrets_in_diff
 
-logger = get_logger(__name__)
+logger = get_logger(__name__)   
 
 class ConfigurationError(ValueError):
     """Raised when configuration is invalid or missing."""
@@ -74,13 +75,12 @@ class GitHubActionClient:
         response = requests.get(pr_url, headers=self.headers)
         response.raise_for_status()
         pr_data = response.json()
-        
+
         # Get PR files with pagination support
         files_url = f"https://api.github.com/repos/{repo_name}/pulls/{pr_number}/files?per_page=100"
         response = requests.get(files_url, headers=self.headers)
         response.raise_for_status()
         files_data = response.json()
-        
         return {
             'number': pr_data['number'],
             'title': pr_data['title'],
@@ -186,7 +186,7 @@ class GitHubActionClient:
         
         return ''.join(filtered_sections)
 
-
+   
 class SimpleClaudeRunner:
     """Simplified Claude Code runner for GitHub Actions."""
     
@@ -231,8 +231,6 @@ class SimpleClaudeRunner:
             # Run Claude Code with retry logic
             NUM_RETRIES = 3
             for attempt in range(NUM_RETRIES):
-                print(f"Starting CMd process...{cmd}", file=sys.stderr) 
-                print(f"Starting prompt process...{prompt}", file=sys.stderr) 
                 result = subprocess.run(
                     cmd,
                     input=prompt,  # Pass prompt via stdin
@@ -241,6 +239,7 @@ class SimpleClaudeRunner:
                     text=True,
                     timeout=self.timeout_seconds
                 )
+                print(f"[Debug] Claude Code execution result:\n{result}", file=sys.stderr)
                 
                 if result.returncode != 0:
                     if attempt == NUM_RETRIES - 1:
@@ -576,41 +575,39 @@ def main():
         try:
             pr_data = github_client.get_pr_data(repo_name, pr_number)
 
-            # pr_diff = github_client.get_pr_diff(repo_name, pr_number)
             unmaskedpr_diff = github_client.get_pr_diff(repo_name, pr_number)
-
+            
+            # Apply secret masking only if secrets are detected
             masked_diff = gitmask_secrets_in_diff(unmaskedpr_diff, verbose=False)
-            pr_diff = masked_diff
             
             # Check if any secrets were actually masked
-            # if '[REDACTED_SECRET]' in masked_diff:
-            #     pr_diff = masked_diff
-            #     # print(f"[Debug] Secrets detected and masked, using masked diff")
-
-            # else:
-            #     pr_diff = unmaskedpr_diff
-            #     # print(f"PR diff_masked: {pr_diff}")
-
-
-            # # print(f"[Debug] PR diff_masked: {pr_diff}")
-            # # print(f"[Debug] PR diff_unmasked: {unmaskedpr_diff}")
+            if '[REDACTED_SECRET]' in masked_diff:
+                pr_diff = masked_diff
+                print(f"[Debug] Secrets detected and masked, using masked diff")
+            else:
+                pr_diff = unmaskedpr_diff
+                print(f"[Debug] No secrets detected, using original diff")
 
             
+            # # Test secret detection with a sample diff containing secrets
+            # pr_diff = github_client.get_pr_diff(repo_name, pr_number)
+            # print(f"[Debug] PR diff_amit: {pr_diff}")
+
         except Exception as e:
             print(json.dumps({'error': f'Failed to fetch PR data: {str(e)}'}))
             sys.exit(EXIT_GENERAL_ERROR)
                 
         # Generate security audit prompt
         prompt = get_security_audit_prompt(pr_data, pr_diff, custom_scan_instructions=custom_scan_instructions)
-        print(f"Starting audit process...{prompt}", file=sys.stderr)        # logger.info(f"Security audit prompt:\n{prompt}")        # Run Claude Code security audit
-
-        
+        print(f"[Debug] Security audit prompt:\n{prompt}", file=sys.stderr)
         # Run Claude Code security audit
         # Get repo directory from environment or use current directory
         repo_path = os.environ.get('REPO_PATH')
         repo_dir = Path(repo_path) if repo_path else Path.cwd()
         success, error_msg, results = claude_runner.run_security_audit(repo_dir, prompt)
-        
+        print(f"[Debug] Security audit results:\n{results}", file=sys.stderr)
+        print(f"[Debug] Security audit error message:\n{error_msg}", file=sys.stderr)
+        print(f"[Debug] Security audit success:\n{success}", file=sys.stderr)
         # If prompt is too long, retry without diff
         if not success and error_msg == "PROMPT_TOO_LONG":
             print(f"[Info] Prompt too long, retrying without diff. Original prompt length: {len(prompt)} characters", file=sys.stderr)
@@ -666,4 +663,10 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    import sys
+    
+    # Check if we should run the secret detection test
+    if len(sys.argv) > 1 and sys.argv[1] == '--test-secrets':
+        print("🧪 Running secret detection test...")
+    else:
+        main()
