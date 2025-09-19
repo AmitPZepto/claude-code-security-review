@@ -161,7 +161,6 @@ class ClaudeAPIClient:
             system_prompt = self._generate_system_prompt()
             
 
-            print("Single finding prompt", prompt,file=sys.stderr)
             
             # Call Claude API
             success, response_text, error_msg = self.call_with_retry(
