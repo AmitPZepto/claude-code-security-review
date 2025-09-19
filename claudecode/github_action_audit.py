@@ -242,8 +242,7 @@ class SimpleClaudeRunner:
                 print(f"[Debug] Running Claude Code with timeout: {self.timeout_seconds}", file=sys.stderr)
                 result = subprocess.run(
                     cmd,
-                    input=prompt,  # Pass prompt via stdin
-                    cwd=repo_dir,
+                    input=prompt,  # Pass prompt via stdin  cwd=repo_dir,
                     capture_output=True,
                     text=True,
                     timeout=self.timeout_seconds
@@ -456,6 +455,8 @@ def run_security_audit(claude_runner: SimpleClaudeRunner, prompt: str) -> Dict[s
     # Get repo directory from environment or use current directory
     repo_path = os.environ.get('REPO_PATH')
     repo_dir = Path(repo_path) if repo_path else Path.cwd()
+    print(f"[Debug] Repo directory: {repo_dir}", file=sys.stderr)
+    print(f"[Debug] Prompt: {prompt}", file=sys.stderr)
     success, error_msg, results = claude_runner.run_security_audit(repo_dir, prompt)
     
     if not success:
