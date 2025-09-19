@@ -583,10 +583,10 @@ def main():
             # Check if any secrets were actually masked
             if '[REDACTED_SECRET]' in masked_diff:
                 pr_diff = masked_diff
-                print(f"[Debug] Secrets detected and masked, using masked diff")
+                # print(f"[Debug] Secrets detected and masked, using masked diff")
             else:
                 pr_diff = unmaskedpr_diff
-                print(f"[Debug] No secrets detected, using original diff")
+                # print(f"[Debug] No secrets detected, using original diff")
 
             
             # # Test secret detection with a sample diff containing secrets
