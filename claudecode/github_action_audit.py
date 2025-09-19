@@ -231,6 +231,10 @@ class SimpleClaudeRunner:
             # Run Claude Code with retry logic
             NUM_RETRIES = 3
             for attempt in range(NUM_RETRIES):
+                print(f"[Debug] Running Claude Code with prompt: {prompt}", file=sys.stderr)
+                print(f"[Debug] Running Claude Code with command: {cmd}", file=sys.stderr)
+                print(f"[Debug] Running Claude Code with repo_dir: {repo_dir}", file=sys.stderr)
+                print(f"[Debug] Running Claude Code with timeout: {self.timeout_seconds}", file=sys.stderr)
                 result = subprocess.run(
                     cmd,
                     input=prompt,  # Pass prompt via stdin
