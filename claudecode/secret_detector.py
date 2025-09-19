@@ -30,7 +30,7 @@ class SecretDetector:
             pr_diff: The PR diff content to analyze
 
         Returns:
-            PR diff content with secrets masked as [REDACTED_SECRET]
+            PR diff content with secrets masked as [SENSITIVE_DATA_REMOVED]
         """
         if not pr_diff or not pr_diff.strip():
             self._log("No diff content provided", "WARNING")
@@ -64,8 +64,8 @@ class SecretDetector:
                 self._log("🎯 FINAL SECRET DETECTION SUMMARY:")
                 self._log(f"   Original diff size: {len(pr_diff)} characters")
                 self._log(f"   Masked diff size: {len(masked_content)} characters")
-                self._log(f"   Secrets detected: {'Yes' if '[REDACTED_SECRET]' in masked_content else 'No'}")
-                self._log(f"   Redaction count: {masked_content.count('[REDACTED_SECRET]')}")
+                self._log(f"   Secrets detected: {'Yes' if '[SENSITIVE_DATA_REMOVED]' in masked_content else 'No'}")
+                self._log(f"   Redaction count: {masked_content.count('[SENSITIVE_DATA_REMOVED]')}")
 
                 return masked_content
             else:
@@ -241,10 +241,10 @@ class SecretDetector:
                         'rule': rule,
                         'original': secret_value,
                         'occurrences': occurrences,
-                        'replaced_with': '[REDACTED_SECRET]'
+                        'replaced_with': '[SENSITIVE_DATA_REMOVED]'
                     })
 
-                    self._log(f"   ✅ Replaced with: [REDACTED_SECRET]")
+                    self._log(f"   ✅ Replaced with: [SENSITIVE_DATA_REMOVED]")
                     self._log("-" * 40)
                 else:
                     self._log(f"⚠️  Secret #{i+1}: Empty or invalid secret value, skipping")
