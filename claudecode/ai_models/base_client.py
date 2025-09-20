@@ -11,6 +11,7 @@ class ModelProvider(Enum):
     """Supported AI model providers."""
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
+    AZURE_OPENAI = "azure_openai"
     # Future providers can be added here
     # GOOGLE = "google"
     # COHERE = "cohere"
@@ -46,6 +47,7 @@ class ModelConfig:
         api_key_vars = {
             ModelProvider.ANTHROPIC: 'ANTHROPIC_API_KEY',
             ModelProvider.OPENAI: 'OPENAI_API_KEY',
+            ModelProvider.AZURE_OPENAI: 'AZURE_OPENAI_API_KEY',
         }
         
         api_key = os.environ.get(api_key_vars[provider_enum])
@@ -56,6 +58,7 @@ class ModelConfig:
         default_models = {
             ModelProvider.ANTHROPIC: 'claude-opus-4-1-20250805',
             ModelProvider.OPENAI: 'gpt-4o',
+            ModelProvider.AZURE_OPENAI: 'gpt-4o',
         }
         
         return cls(

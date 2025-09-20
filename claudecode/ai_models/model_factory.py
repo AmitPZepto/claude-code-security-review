@@ -5,6 +5,7 @@ from typing import Optional
 from .base_client import AIModelClient, ModelConfig, ModelProvider
 from .claude_client import ClaudeClient
 from .openai_client import OpenAIClient
+from .azure_openai_client import AzureOpenAIClient
 from ..logger import get_logger
 
 logger = get_logger(__name__)
@@ -16,6 +17,7 @@ class ModelFactory:
     _providers = {
         ModelProvider.ANTHROPIC: ClaudeClient,
         ModelProvider.OPENAI: OpenAIClient,
+        ModelProvider.AZURE_OPENAI: AzureOpenAIClient,
     }
     
     @classmethod
@@ -68,6 +70,7 @@ class ModelFactory:
         defaults = {
             ModelProvider.ANTHROPIC: 'claude-opus-4-1-20250805',
             ModelProvider.OPENAI: 'gpt-4o',
+            ModelProvider.AZURE_OPENAI: 'gpt-4o',
         }
         return defaults[provider]
     
