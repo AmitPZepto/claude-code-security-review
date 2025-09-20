@@ -245,14 +245,27 @@ runs:
           exit 0
         fi
         
-        # Validate API key is provided
-        if [ -z "$ANTHROPIC_API_KEY" ]; then
-          echo "::error::ANTHROPIC_API_KEY is not set. Please provide the claude-api-key input to the action."
-          echo "Example usage:"
-          echo "  - uses: anthropics/claude-code-security-reviewer@main"
-          echo "    with:"
-          echo "      claude-api-key: \$\{{ secrets.ANTHROPIC_API_KEY }}"
-          exit 1
+        # Validate API key is provided based on provider
+        AI_PROVIDER="${{ inputs.ai-provider }}"
+        if [ "$AI_PROVIDER" = "openai" ]; then
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "::error::OPENAI_API_KEY is not set. Please provide the openai-api-key input to the action."
+            echo "Example usage:"
+            echo "  - uses: your-org/claude-code-security-review@main"
+            echo "    with:"
+            echo "      ai-provider: 'openai'"
+            echo "      openai-api-key: \$\{{ secrets.OPENAI_API_KEY }}"
+            exit 1
+          fi
+        else
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::ANTHROPIC_API_KEY is not set. Please provide the claude-api-key input to the action."
+            echo "Example usage:"
+            echo "  - uses: your-org/claude-code-security-review@main"
+            echo "    with:"
+            echo "      claude-api-key: \$\{{ secrets.ANTHROPIC_API_KEY }}"
+            exit 1
+          fi
         fi
                 
         # Set timeout
