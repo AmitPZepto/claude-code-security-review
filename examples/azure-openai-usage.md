@@ -44,7 +44,7 @@ jobs:
           ai-model: 'gpt-4o'  # Your deployed model name
           azure-openai-api-key: ${{ secrets.AZURE_OPENAI_API_KEY }}
           azure-openai-endpoint: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
-          azure-openai-api-version: '2024-02-15-preview'  # Optional
+          azure-openai-api-version: '2025-01-01-preview'  # Optional
           run-every-commit: true
           upload-results: true
           claudecode-timeout: 20
@@ -58,7 +58,7 @@ The action will set these environment variables:
 - `AI_MODEL=your-model-name`
 - `AZURE_OPENAI_API_KEY=your-api-key`
 - `AZURE_OPENAI_ENDPOINT=your-endpoint`
-- `AZURE_OPENAI_API_VERSION=2024-02-15-preview`
+- `AZURE_OPENAI_API_VERSION=2025-01-01-preview`
 
 ## Supported Models
 
@@ -77,7 +77,7 @@ Azure OpenAI supports various models. Common ones include:
 | `ai-model` | Your deployed model name | Yes | `gpt-4o` |
 | `azure-openai-api-key` | Your Azure OpenAI API key | Yes | - |
 | `azure-openai-endpoint` | Your Azure OpenAI endpoint URL | Yes | - |
-| `azure-openai-api-version` | API version to use | No | `2024-02-15-preview` |
+| `azure-openai-api-version` | API version to use | No | `2025-01-01-preview` |
 
 ## Example with Different Models
 

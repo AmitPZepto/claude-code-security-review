@@ -54,9 +54,9 @@ inputs:
     default: ''
 
   azure-openai-api-version:
-    description: 'Azure OpenAI API version (optional, defaults to 2024-02-15-preview)'
+    description: 'Azure OpenAI API version (optional, defaults to 2025-01-01-preview)'
     required: false
-    default: '2024-02-15-preview'
+    default: '2025-01-01-preview'
 
   claude-model:
     description: 'Claude model to use for security analysis (e.g., claude-sonnet-4-20250514) - DEPRECATED: use ai-model instead'

@@ -44,7 +44,7 @@ class AzureOpenAIClient(AIModelClient):
             response = self.client.chat.completions.create(
                 model=self.config.model_name,
                 messages=[{"role": "user", "content": "Hello"}],
-                max_tokens=10
+                max_completion_tokens=10
             )
             return True, ""
         except Exception as e:
@@ -74,12 +74,25 @@ class AzureOpenAIClient(AIModelClient):
         
         for attempt in range(self.config.max_retries):
             try:
-                response = self.client.chat.completions.create(
-                    model=self.config.model_name,
-                    messages=messages,
-                    max_tokens=max_tokens,
-                    temperature=0.1  # Low temperature for consistent security analysis
-                )
+                # Some Azure OpenAI models don't support custom temperature
+                # Try with temperature first, fallback to default if not supported
+                try:
+                    response = self.client.chat.completions.create(
+                        model=self.config.model_name,
+                        messages=messages,
+                        max_completion_tokens=max_tokens,
+                        temperature=0.1  # Low temperature for consistent security analysis
+                    )
+                except Exception as temp_error:
+                    if "temperature" in str(temp_error).lower():
+                        # Retry without temperature parameter
+                        response = self.client.chat.completions.create(
+                            model=self.config.model_name,
+                            messages=messages,
+                            max_completion_tokens=max_tokens
+                        )
+                    else:
+                        raise temp_error
                 
                 response_text = response.choices[0].message.content
                 return True, response_text, ""

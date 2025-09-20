@@ -77,16 +77,49 @@ jobs:
           comment-pr: true
 ```
 
+### Using Azure OpenAI
+
+```yaml
+name: Security Review with Azure OpenAI
+
+permissions:
+  pull-requests: write
+  contents: read
+
+on:
+  pull_request:
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+      
+      - uses: your-org/claude-code-security-review@main
+        with:
+          ai-provider: 'azure_openai'
+          ai-model: 'gpt-4o'
+          azure-openai-api-key: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          azure-openai-endpoint: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          comment-pr: true
+```
+
 ## Configuration Options
 
 ### Action Inputs
 
 | Input | Description | Default | Required |
 |-------|-------------|---------|----------|
-| `ai-provider` | AI provider to use for security analysis (`anthropic`, `openai`) | `anthropic` | No |
+| `ai-provider` | AI provider to use for security analysis (`anthropic`, `openai`, `azure_openai`) | `anthropic` | No |
 | `ai-model` | AI model to use for security analysis (e.g., `claude-opus-4-1-20250805`, `gpt-4o`) | Provider default | No |
 | `claude-api-key` | Anthropic Claude API key (required if `ai-provider=anthropic`) | None | Conditional |
 | `openai-api-key` | OpenAI API key (required if `ai-provider=openai`) | None | Conditional |
+| `azure-openai-api-key` | Azure OpenAI API key (required if `ai-provider=azure_openai`) | None | Conditional |
+| `azure-openai-endpoint` | Azure OpenAI endpoint URL (required if `ai-provider=azure_openai`) | None | Conditional |
+| `azure-openai-api-version` | Azure OpenAI API version (optional) | `2025-01-01-preview` | No |
 | `comment-pr` | Whether to comment on PRs with findings | `true` | No |
 | `upload-results` | Whether to upload results as artifacts | `true` | No |
 | `exclude-directories` | Comma-separated list of directories to exclude from scanning | None | No |
@@ -104,6 +137,12 @@ jobs:
 - `claude-haiku-3-5-20241022`
 
 #### OpenAI
+- `gpt-4o` (default)
+- `gpt-4o-mini`
+- `gpt-4-turbo`
+- `gpt-3.5-turbo`
+
+#### Azure OpenAI
 - `gpt-4o` (default)
 - `gpt-4o-mini`
 - `gpt-4-turbo`
