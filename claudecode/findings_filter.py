@@ -1,11 +1,12 @@
 """Findings filter for reducing false positives in security audit results."""
 
+import os
 import re
 from typing import Dict, Any, List, Tuple, Optional, Pattern
 import time
 from dataclasses import dataclass, field
 
-from claudecode.claude_api_client import ClaudeAPIClient
+from claudecode.ai_models import get_model_client, ModelConfig
 from claudecode.constants import DEFAULT_CLAUDE_MODEL
 from claudecode.logger import get_logger
 
@@ -159,40 +160,58 @@ class FindingsFilter:
     
     def __init__(self, 
                  use_hard_exclusions: bool = True,
-                 use_claude_filtering: bool = True,
+                 use_ai_filtering: bool = True,
+                 ai_provider: Optional[str] = None,
+                 ai_model: Optional[str] = None,
                  api_key: Optional[str] = None,
-                 model: str = DEFAULT_CLAUDE_MODEL,
                  custom_filtering_instructions: Optional[str] = None):
         """Initialize findings filter.
         
         Args:
             use_hard_exclusions: Whether to apply hard exclusion rules
-            use_claude_filtering: Whether to use Claude API for filtering
-            api_key: Anthropic API key for Claude filtering
-            model: Claude model to use for filtering
+            use_ai_filtering: Whether to use AI API for filtering
+            ai_provider: AI provider to use (anthropic, openai, etc.)
+            ai_model: AI model to use for filtering
+            api_key: API key for AI filtering
             custom_filtering_instructions: Optional custom filtering instructions
         """
         self.use_hard_exclusions = use_hard_exclusions
-        self.use_claude_filtering = use_claude_filtering
+        self.use_ai_filtering = use_ai_filtering
         self.custom_filtering_instructions = custom_filtering_instructions
         
-        # Initialize Claude client if filtering is enabled
-        self.claude_client = None
-        if self.use_claude_filtering:
+        # Initialize AI client if filtering is enabled
+        self.ai_client = None
+        if self.use_ai_filtering:
             try:
-                self.claude_client = ClaudeAPIClient(
-                    model=model,
-                    api_key=api_key
-                )
+                # Get provider from environment or parameter
+                provider = ai_provider or os.environ.get('AI_PROVIDER', 'anthropic')
+                
+                # Get model from parameter or environment
+                model = ai_model or os.environ.get('AI_MODEL')
+                
+                # Get API key from parameter or environment
+                if not api_key:
+                    if provider.lower() == 'anthropic':
+                        api_key = os.environ.get('ANTHROPIC_API_KEY')
+                    elif provider.lower() == 'openai':
+                        api_key = os.environ.get('OPENAI_API_KEY')
+                
+                if not api_key:
+                    logger.warning(f"No API key found for provider {provider}")
+                    self.use_ai_filtering = False
+                    return
+                
+                self.ai_client = get_model_client(provider, model, api_key)
+                
                 # Validate API access
-                valid, error = self.claude_client.validate_api_access()
+                valid, error = self.ai_client.validate_api_access()
                 if not valid:
-                    logger.warning(f"Claude API validation failed: {error}")
-                    self.claude_client = None
-                    self.use_claude_filtering = False
+                    logger.warning(f"AI API validation failed: {error}")
+                    self.ai_client = None
+                    self.use_ai_filtering = False
             except Exception as e:
-                logger.error(f"Failed to initialize Claude client: {str(e)}")
-                self.use_claude_filtering = False
+                logger.error(f"Failed to initialize AI client: {str(e)}")
+                self.use_ai_filtering = False
     
     def filter_findings(self, 
                        findings: List[Dict[str, Any]],
@@ -252,22 +271,22 @@ class FindingsFilter:
         else:
             findings_after_hard = [(i, f) for i, f in enumerate(findings)]
         
-        # Step 2: Apply Claude API filtering if enabled
-        findings_after_claude = []
-        excluded_claude = []
+        # Step 2: Apply AI API filtering if enabled
+        findings_after_ai = []
+        excluded_ai = []
         
-        if self.use_claude_filtering and self.claude_client and findings_after_hard:
+        if self.use_ai_filtering and self.ai_client and findings_after_hard:
             # Process findings individually
-            logger.info(f"Processing {len(findings_after_hard)} findings individually through Claude API")
+            logger.info(f"Processing {len(findings_after_hard)} findings individually through {self.ai_client.get_provider_name()} API")
             
             for orig_idx, finding in findings_after_hard:
-                # Call Claude API for single finding
-                success, analysis_result, error_msg = self.claude_client.analyze_single_finding(
+                # Call AI API for single finding
+                success, analysis_result, error_msg = self.ai_client.analyze_single_finding(
                     finding, pr_context, self.custom_filtering_instructions
                 )
                 
                 if success and analysis_result:
-                    # Process Claude's analysis for single finding
+                    # Process AI's analysis for single finding
                     confidence = analysis_result.get('confidence_score', 10.0)
                     keep_finding = analysis_result.get('keep_finding', True)
                     justification = analysis_result.get('justification', '')
@@ -276,13 +295,13 @@ class FindingsFilter:
                     stats.confidence_scores.append(confidence)
                     
                     if not keep_finding:
-                        # Claude recommends excluding
-                        excluded_claude.append({
+                        # AI recommends excluding
+                        excluded_ai.append({
                             "finding": finding,
                             "confidence_score": confidence,
                             "exclusion_reason": exclusion_reason or f"Low confidence score: {confidence}",
                             "justification": justification,
-                            "filter_stage": "claude_api"
+                            "filter_stage": "ai_api"
                         })
                         stats.claude_excluded += 1
                     else:
@@ -292,45 +311,45 @@ class FindingsFilter:
                             'confidence_score': confidence,
                             'justification': justification,
                         }
-                        findings_after_claude.append(enriched_finding)
+                        findings_after_ai.append(enriched_finding)
                         stats.kept_findings += 1
                 else:
-                    # Claude API call failed for this finding - keep it with warning
-                    logger.warning(f"Claude API call failed for finding {orig_idx}: {error_msg}")
+                    # AI API call failed for this finding - keep it with warning
+                    logger.warning(f"AI API call failed for finding {orig_idx}: {error_msg}")
                     enriched_finding = finding.copy()
                     enriched_finding['_filter_metadata'] = {
                         'confidence_score': 10.0,  # Default high confidence
-                        'justification': f'Claude API failed: {error_msg}',
+                        'justification': f'AI API failed: {error_msg}',
                     }
-                    findings_after_claude.append(enriched_finding)
+                    findings_after_ai.append(enriched_finding)
                     stats.kept_findings += 1
         else:
-            # Claude filtering disabled or no client - keep all findings from hard filter
+            # AI filtering disabled or no client - keep all findings from hard filter
             for orig_idx, finding in findings_after_hard:
                 enriched_finding = finding.copy()
                 enriched_finding['_filter_metadata'] = {
                     'confidence_score': 10.0,  # Default high confidence
-                    'justification': 'Claude filtering disabled',
+                    'justification': 'AI filtering disabled',
                 }
-                findings_after_claude.append(enriched_finding)
+                findings_after_ai.append(enriched_finding)
                 stats.kept_findings += 1
         
         # Combine all excluded findings
-        all_excluded = excluded_hard + excluded_claude
+        all_excluded = excluded_hard + excluded_ai
         
         # Calculate final statistics
         stats.runtime_seconds = time.time() - start_time
         
         # Build filtered results
         filtered_results = {
-            "filtered_findings": findings_after_claude,
+            "filtered_findings": findings_after_ai,
             "excluded_findings": all_excluded,
             "analysis_summary": {
                 "total_findings": stats.total_findings,
                 "kept_findings": stats.kept_findings,
                 "excluded_findings": len(all_excluded),
                 "hard_excluded": stats.hard_excluded,
-                "claude_excluded": stats.claude_excluded,
+                "ai_excluded": stats.claude_excluded,  # Keep same field name for backward compatibility
                 "exclusion_breakdown": stats.exclusion_breakdown,
                 "average_confidence": sum(stats.confidence_scores) / len(stats.confidence_scores) if stats.confidence_scores else None,
                 "runtime_seconds": stats.runtime_seconds

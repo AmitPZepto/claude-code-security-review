@@ -23,13 +23,28 @@ inputs:
     required: false
     default: '20'
   
+  ai-provider:
+    description: 'AI provider to use for security analysis (anthropic, openai)'
+    required: false
+    default: 'anthropic'
+
+  ai-model:
+    description: 'AI model to use for security analysis (e.g., claude-opus-4-1-20250805, gpt-4o)'
+    required: false
+    default: ''
+
   claude-api-key:
-    description: 'Anthropic Claude API key for security analysis'
-    required: true
+    description: 'Anthropic Claude API key for security analysis (required if ai-provider=anthropic)'
+    required: false
+    default: ''
+
+  openai-api-key:
+    description: 'OpenAI API key for security analysis (required if ai-provider=openai)'
+    required: false
     default: ''
 
   claude-model:
-    description: 'Claude model to use for security analysis (e.g., claude-sonnet-4-20250514)'
+    description: 'Claude model to use for security analysis (e.g., claude-sonnet-4-20250514) - DEPRECATED: use ai-model instead'
     required: false
     default: ''
 
@@ -205,7 +220,10 @@ runs:
         GITHUB_TOKEN: ${{ github.token }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
+        AI_PROVIDER: ${{ inputs.ai-provider }}
+        AI_MODEL: ${{ inputs.ai-model }}
         ANTHROPIC_API_KEY: ${{ inputs.claude-api-key }}
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
         ENABLE_CLAUDE_FILTERING: 'true' 
         EXCLUDE_DIRECTORIES: ${{ inputs.exclude-directories }}
         FALSE_POSITIVE_FILTERING_INSTRUCTIONS: ${{ inputs.false-positive-filtering-instructions }}

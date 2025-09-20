@@ -1,22 +1,28 @@
-# Claude Code Security Reviewer
+# AI Code Security Reviewer
 
-An AI-powered security review GitHub Action using Claude to analyze code changes for security vulnerabilities. This action provides intelligent, context-aware security analysis for pull requests using Anthropic's Claude Code tool for deep semantic security analysis. See our blog post [here](https://www.anthropic.com/news/automate-security-reviews-with-claude-code) for more details.
+An AI-powered security review GitHub Action that supports multiple AI providers to analyze code changes for security vulnerabilities. This action provides intelligent, context-aware security analysis for pull requests using AI models for deep semantic security analysis.
+
+**Supported AI Providers:**
+- **Anthropic Claude** (default) - Using Claude Code tool
+- **OpenAI GPT** - Using GPT-4o and other models
+- **Extensible** - Easy to add new providers
 
 ## Features
 
-- **AI-Powered Analysis**: Uses Claude's advanced reasoning to detect security vulnerabilities with deep semantic understanding
+- **Multi-Provider AI Analysis**: Supports Claude, OpenAI, and other AI providers for security vulnerability detection
+- **Deep Semantic Understanding**: Goes beyond pattern matching to understand code semantics and context
 - **Diff-Aware Scanning**: For PRs, only analyzes changed files
 - **PR Comments**: Automatically comments on PRs with security findings
-- **Contextual Understanding**: Goes beyond pattern matching to understand code semantics
 - **Language Agnostic**: Works with any programming language
-- **False Positive Filtering**: Advanced filtering to reduce noise and focus on real vulnerabilities
+- **False Positive Filtering**: Advanced AI-powered filtering to reduce noise and focus on real vulnerabilities
+- **Extensible Architecture**: Easy to add new AI providers and models
 
 ## Quick Start
 
-Add this to your repository's `.github/workflows/security.yml`:
+### Using Claude (Default)
 
 ```yaml
-name: Security Review
+name: Security Review with Claude
 
 permissions:
   pull-requests: write  # Needed for leaving PR comments
@@ -34,10 +40,40 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 2
       
-      - uses: anthropics/claude-code-security-review@main
+      - uses: your-org/claude-code-security-review@main
         with:
+          ai-provider: 'anthropic'
+          claude-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           comment-pr: true
-          claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
+```
+
+### Using OpenAI
+
+```yaml
+name: Security Review with OpenAI
+
+permissions:
+  pull-requests: write
+  contents: read
+
+on:
+  pull_request:
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+      
+      - uses: your-org/claude-code-security-review@main
+        with:
+          ai-provider: 'openai'
+          ai-model: 'gpt-4o'
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          comment-pr: true
 ```
 
 ## Configuration Options
@@ -46,15 +82,31 @@ jobs:
 
 | Input | Description | Default | Required |
 |-------|-------------|---------|----------|
-| `claude-api-key` | Anthropic Claude API key for security analysis. <br>*Note*: This API key needs to be enabled for both the Claude API and Claude Code usage. | None | Yes |
+| `ai-provider` | AI provider to use for security analysis (`anthropic`, `openai`) | `anthropic` | No |
+| `ai-model` | AI model to use for security analysis (e.g., `claude-opus-4-1-20250805`, `gpt-4o`) | Provider default | No |
+| `claude-api-key` | Anthropic Claude API key (required if `ai-provider=anthropic`) | None | Conditional |
+| `openai-api-key` | OpenAI API key (required if `ai-provider=openai`) | None | Conditional |
 | `comment-pr` | Whether to comment on PRs with findings | `true` | No |
 | `upload-results` | Whether to upload results as artifacts | `true` | No |
 | `exclude-directories` | Comma-separated list of directories to exclude from scanning | None | No |
-| `claude-model` | Claude [model name](https://docs.anthropic.com/en/docs/about-claude/models/overview#model-names) to use. Defaults to Opus 4.1. | `claude-opus-4-1-20250805` | No |
 | `claudecode-timeout` | Timeout for ClaudeCode analysis in minutes | `20` | No |
 | `run-every-commit` | Run ClaudeCode on every commit (skips cache check). Warning: May increase false positives on PRs with many commits. | `false` | No |
 | `false-positive-filtering-instructions` | Path to custom false positive filtering instructions text file | None | No |
 | `custom-security-scan-instructions` | Path to custom security scan instructions text file to append to audit prompt | None | No |
+| `claude-model` | Claude model name - **DEPRECATED**: Use `ai-model` instead | None | No |
+
+### Supported Models
+
+#### Anthropic Claude
+- `claude-opus-4-1-20250805` (default)
+- `claude-sonnet-4-20250514`
+- `claude-haiku-3-5-20241022`
+
+#### OpenAI
+- `gpt-4o` (default)
+- `gpt-4o-mini`
+- `gpt-4-turbo`
+- `gpt-3.5-turbo`
 
 ### Action Outputs
 

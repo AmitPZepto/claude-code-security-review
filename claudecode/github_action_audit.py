@@ -415,23 +415,21 @@ def initialize_findings_filter(custom_filtering_instructions: Optional[str] = No
         ConfigurationError: If filter initialization fails
     """
     try:
-        # Check if we should use Claude API filtering
-        use_claude_filtering = os.environ.get('ENABLE_CLAUDE_FILTERING', 'false').lower() == 'true'
-        api_key = os.environ.get('ANTHROPIC_API_KEY')
+        # Check if we should use AI API filtering
+        use_ai_filtering = os.environ.get('ENABLE_CLAUDE_FILTERING', 'false').lower() == 'true'
         
-        if use_claude_filtering and api_key:
-            # Use full filtering with Claude API
+        if use_ai_filtering:
+            # Use full filtering with AI API
             return FindingsFilter(
                 use_hard_exclusions=True,
-                use_claude_filtering=True,
-                api_key=api_key,
+                use_ai_filtering=True,
                 custom_filtering_instructions=custom_filtering_instructions
             )
         else:
             # Fallback to filtering with hard rules only
             return FindingsFilter(
                 use_hard_exclusions=True,
-                use_claude_filtering=False
+                use_ai_filtering=False
             )
     except Exception as e:
         raise ConfigurationError(f'Failed to initialize findings filter: {str(e)}')
