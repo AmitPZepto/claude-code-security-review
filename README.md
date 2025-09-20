@@ -5,11 +5,12 @@ An AI-powered security review GitHub Action that supports multiple AI providers 
 **Supported AI Providers:**
 - **Anthropic Claude** (default) - Using Claude Code tool
 - **OpenAI GPT** - Using GPT-4o and other models
+- **Azure OpenAI** - Using Azure OpenAI services
 - **Extensible** - Easy to add new providers
 
 ## Features
 
-- **Multi-Provider AI Analysis**: Supports Claude, OpenAI, and other AI providers for security vulnerability detection
+- **Multi-Provider AI Analysis**: Supports Claude, OpenAI, Azure OpenAI, and other AI providers for security vulnerability detection
 - **Deep Semantic Understanding**: Goes beyond pattern matching to understand code semantics and context
 - **Diff-Aware Scanning**: For PRs, only analyzes changed files
 - **PR Comments**: Automatically comments on PRs with security findings

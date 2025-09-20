@@ -275,6 +275,27 @@ runs:
             echo "      openai-api-key: \$\{{ secrets.OPENAI_API_KEY }}"
             exit 1
           fi
+        elif [ "$AI_PROVIDER" = "azure_openai" ]; then
+          if [ -z "$AZURE_OPENAI_API_KEY" ]; then
+            echo "::error::AZURE_OPENAI_API_KEY is not set. Please provide the azure-openai-api-key input to the action."
+            echo "Example usage:"
+            echo "  - uses: your-org/claude-code-security-review@main"
+            echo "    with:"
+            echo "      ai-provider: 'azure_openai'"
+            echo "      azure-openai-api-key: \$\{{ secrets.AZURE_OPENAI_API_KEY }}"
+            echo "      azure-openai-endpoint: \$\{{ secrets.AZURE_OPENAI_ENDPOINT }}"
+            exit 1
+          fi
+          if [ -z "$AZURE_OPENAI_ENDPOINT" ]; then
+            echo "::error::AZURE_OPENAI_ENDPOINT is not set. Please provide the azure-openai-endpoint input to the action."
+            echo "Example usage:"
+            echo "  - uses: your-org/claude-code-security-review@main"
+            echo "    with:"
+            echo "      ai-provider: 'azure_openai'"
+            echo "      azure-openai-api-key: \$\{{ secrets.AZURE_OPENAI_API_KEY }}"
+            echo "      azure-openai-endpoint: \$\{{ secrets.AZURE_OPENAI_ENDPOINT }}"
+            exit 1
+          fi
         else
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "::error::ANTHROPIC_API_KEY is not set. Please provide the claude-api-key input to the action."
