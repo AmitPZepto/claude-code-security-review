@@ -1,6 +1,7 @@
 """AI-powered security runner that supports multiple providers."""
 
 import os
+import sys
 import json
 import time
 from typing import Dict, Any, Tuple, Optional
