@@ -26,6 +26,7 @@ from claudecode.constants import (
     SUBPROCESS_TIMEOUT
 )
 from claudecode.logger import get_logger
+from claudecode.ai_security_runner import AISecurityRunner
 
 from claudecode.secret_detector import gitmask_secrets_in_diff
 
@@ -380,11 +381,11 @@ def get_environment_config() -> Tuple[str, int]:
     return repo_name, pr_number
 
 
-def initialize_clients() -> Tuple[GitHubActionClient, SimpleClaudeRunner]:
-    """Initialize GitHub and Claude clients.
+def initialize_clients() -> Tuple[GitHubActionClient, AISecurityRunner]:
+    """Initialize GitHub and AI security clients.
     
     Returns:
-        Tuple of (github_client, claude_runner)
+        Tuple of (github_client, ai_runner)
         
     Raises:
         ConfigurationError: If client initialization fails
@@ -395,11 +396,11 @@ def initialize_clients() -> Tuple[GitHubActionClient, SimpleClaudeRunner]:
         raise ConfigurationError(f'Failed to initialize GitHub client: {str(e)}')
     
     try:
-        claude_runner = SimpleClaudeRunner()
+        ai_runner = AISecurityRunner()
     except Exception as e:
-        raise ConfigurationError(f'Failed to initialize Claude runner: {str(e)}')
+        raise ConfigurationError(f'Failed to initialize AI security runner: {str(e)}')
         
-    return github_client, claude_runner
+    return github_client, ai_runner
 
 
 def initialize_findings_filter(custom_filtering_instructions: Optional[str] = None) -> FindingsFilter:
@@ -436,11 +437,11 @@ def initialize_findings_filter(custom_filtering_instructions: Optional[str] = No
 
 
 
-def run_security_audit(claude_runner: SimpleClaudeRunner, prompt: str) -> Dict[str, Any]:
-    """Run the security audit with Claude Code.
+def run_security_audit(ai_runner: AISecurityRunner, prompt: str) -> Dict[str, Any]:
+    """Run the security audit with AI.
     
     Args:
-        claude_runner: Claude runner instance
+        ai_runner: AI security runner instance
         prompt: The security audit prompt
         
     Returns:
@@ -454,7 +455,7 @@ def run_security_audit(claude_runner: SimpleClaudeRunner, prompt: str) -> Dict[s
     repo_dir = Path(repo_path) if repo_path else Path.cwd()
     print(f"[Debug] Repo directory: {repo_dir}", file=sys.stderr)
     print(f"[Debug] Prompt: {prompt}", file=sys.stderr)
-    success, error_msg, results = claude_runner.run_security_audit(repo_dir, prompt)
+    success, error_msg, results = ai_runner.run_security_audit(repo_dir, prompt)
     
     if not success:
         raise AuditError(f'Security audit failed: {error_msg}')
@@ -560,7 +561,7 @@ def main():
         
         # Initialize components
         try:
-            github_client, claude_runner = initialize_clients()
+            github_client, ai_runner = initialize_clients()
         except ConfigurationError as e:
             print(json.dumps({'error': str(e)}))
             sys.exit(EXIT_CONFIGURATION_ERROR)
@@ -572,10 +573,10 @@ def main():
             print(json.dumps({'error': str(e)}))
             sys.exit(EXIT_CONFIGURATION_ERROR)
         
-        # Validate Claude Code is available
-        claude_ok, claude_error = claude_runner.validate_claude_available()
-        if not claude_ok:
-            print(json.dumps({'error': f'Claude Code not available: {claude_error}'}))
+        # Validate AI runner is available
+        ai_ok, ai_error = ai_runner.validate_ai_available()
+        if not ai_ok:
+            print(json.dumps({'error': f'AI runner not available: {ai_error}'}))
             sys.exit(EXIT_GENERAL_ERROR)
         
         # Get PR data
@@ -603,11 +604,11 @@ def main():
         # Generate security audit prompt
         prompt = get_security_audit_prompt(pr_data, pr_diff, custom_scan_instructions=custom_scan_instructions)
         print(f"[Debug] Security audit prompt:\n{prompt}", file=sys.stderr)
-        # Run Claude Code security audit
+        # Run AI security audit
         # Get repo directory from environment or use current directory
         repo_path = os.environ.get('REPO_PATH')
         repo_dir = Path(repo_path) if repo_path else Path.cwd()
-        success, error_msg, results = claude_runner.run_security_audit(repo_dir, prompt)
+        success, error_msg, results = ai_runner.run_security_audit(repo_dir, prompt)
         print(f"[Debug] Security audit results:\n{results}", file=sys.stderr)
         print(f"[Debug] Security audit error message:\n{error_msg}", file=sys.stderr)
         print(f"[Debug] Security audit success:\n{success}", file=sys.stderr)
@@ -616,7 +617,7 @@ def main():
             print(f"[Info] Prompt too long, retrying without diff. Original prompt length: {len(prompt)} characters", file=sys.stderr)
             prompt_without_diff = get_security_audit_prompt(pr_data, pr_diff, include_diff=False, custom_scan_instructions=custom_scan_instructions)
             print(f"[Info] New prompt length: {len(prompt_without_diff)} characters", file=sys.stderr)
-            success, error_msg, results = claude_runner.run_security_audit(repo_dir, prompt_without_diff)
+            success, error_msg, results = ai_runner.run_security_audit(repo_dir, prompt_without_diff)
         
         if not success:
             print(json.dumps({'error': f'Security audit failed: {error_msg}'}))
